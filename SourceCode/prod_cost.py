@@ -11,7 +11,6 @@ from SourceCode.utils import MRIO_df_to_vec
 
 class prod_cost:
     def __init__(self, EXOG_VARS, scenario):
-        self.LABOR_BASE = EXOG_VARS.LABOR_BASE
         self.INITIAL_VA = EXOG_VARS.INITIAL_VA.query("year == 2019").drop(columns=['year'])
         self.output = EXOG_VARS.output
         self.R = EXOG_VARS.R
