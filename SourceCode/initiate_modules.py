@@ -712,7 +712,7 @@ def initiate_modules(self, DYNAMIC, EXOG_VARS, MRIO_df_to_vec_DEF, MRIO_vec_to_d
             'd_productivity': np.nan_to_num(self.V.read_var('productivity', year-1) / self.V.read_var('productivity', year-2) -1, posinf=0, neginf=0),
             'employment_base': self.V.read_var('employment_base', year, as_df=True),
             'unemployment_rate': self.V.read_var('shadow_unemployment_rate', year-1, as_df=True).rename(columns={'shadow_unemployment_rate':'unemployment_rate'}),
-            'unemployment_rate_prev': self.V.read_var('unemployment_rate', year-2, as_df=True)
+            'unemployment_rate_prev': self.V.read_var('shadow_unemployment_rate', year-2, as_df=True).rename(columns={'shadow_unemployment_rate':'unemployment_rate'})
         })
         Inc_model.calc_wage(econometrics=True)
         self.V.write_var('wage', year, Inc_model.wage, from_df=True)

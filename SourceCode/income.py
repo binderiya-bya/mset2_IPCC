@@ -56,7 +56,9 @@ class income:
         self.params = {}
         self.params['PROD_ln_L1'] = load_param('wage_PROD_ln_L1')
         self.params['CPI_ln_L1'] = load_param('wage_CPI_ln_L1')
-        self.params['UNEMP_ln_L1'] = load_param('wage_UNEMP_ln_L1')
+        # Estimated per percentage point of unemployment; the model's unemployment rate is a fraction, hence * 100.
+        # Stability bounds are applied to parameters.csv by DATA/bound_parameters.py.
+        self.params['UNEMP_ln_L1'] = load_param('wage_UNEMP_ln_L1') * 100
         self.params['W_avg_ln_L1'] = load_param("wage_W_avg_ln_L1")
 
     def load_dynamic(self, vars_):
