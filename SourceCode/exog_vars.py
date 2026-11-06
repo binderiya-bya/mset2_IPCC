@@ -13,6 +13,8 @@ import os
 
 import time
 
+# THESE ARE ONLY DEFAULTS
+# overwritten below
 GLORIA_SECTOR_ROLES = {
     'cost_curve': [24, 25, 26, 27],
     'refining': [62, 63, 94],

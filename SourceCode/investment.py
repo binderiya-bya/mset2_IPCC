@@ -189,8 +189,9 @@ class invest:
         interest_rate = interest_rate.merge(self.INFLATION_TARGET, how='left', on=['REG_imp'])
         
         # interest_rate = 0.05 + 0.5 * [diff from inflation target] + 0.5 * [output gap]
-        interest_rate['interest_rate'] = 0.005 + 0.5 * (interest_rate['dp_prev1'] - interest_rate['inflation_target']) + 0.5 * (interest_rate['output_gap'])
-        interest_rate['interest_rate_real'] = (interest_rate['interest_rate'] - interest_rate['dp_prev1']) / (1 + interest_rate['dp_prev2']) # 0.02 is 2%
+        interest_rate['interest_rate'] = interest_rate['dp_prev1'] + 0.5 * (interest_rate['dp_prev1'] - interest_rate['inflation_target']) + 0.5 * (interest_rate['output_gap'])
+        interest_rate['interest_rate'] = np.maximum(interest_rate['interest_rate'], 0.1)
+        interest_rate['interest_rate_real'] = (interest_rate['interest_rate'] - interest_rate['dp_prev1']) / (1 + interest_rate['dp_prev1']) # 0.02 is 2%
 
         interest_rate['interest_rate_prev'] = 0.005 + 0.5 * (interest_rate['dp_prev2'] - interest_rate['inflation_target_prev']) + 0.5 * (interest_rate['output_gap_prev'])
         interest_rate['interest_rate_real_prev'] = (interest_rate['interest_rate_prev'] - interest_rate['dp_prev2']) / (1 + interest_rate['dp_prev2']) # 0.02 is 2%
@@ -215,7 +216,7 @@ class invest:
 
         # ! limit; we need this for sectors that go into zero and then back
         investment.loc[investment['dk'] > investment['dk_base'] * 3, 'dk'] = investment['dk_base'] * 3 
-        investment.loc[investment['dk'] + investment['dk_base'] < investment['dk_base'] * 0.1, 'dk'] = investment['dk_base'] * 0.1 
+        investment.loc[investment['dk'] + investment['dk_base'] < investment['dk_base'] * 0.1, 'dk'] = investment['dk_base'] * -0.9 
 
         # ? new INV_CONV is: REG_imp | PROD_COMM | TRAD_COMM | input_coeff
         INV_CONV = self.INV_CONV.astype({'PROD_COMM':'int16','TRAD_COMM':'int16'})
