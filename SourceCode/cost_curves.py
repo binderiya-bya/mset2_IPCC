@@ -44,8 +44,18 @@ class cost_curves:
         df['x_curr'] = df['output'] / df['q_base']
         df = df.merge(self.cost_curves_table, how='left', on=['REG_imp','PROD_COMM']).fillna(0)
 
-        df['p_prev'] = df['a'] + df['b'] * (df['x_prev']**df['f']+df['e']) + df['c'] * (df['x_prev']**df['f']+df['e'])**2 + df['d'] * (df['x_prev']**df['f']+df['e'])**3
-        df['p_curr'] = df['a'] + df['b'] * (df['x_curr']**df['f']+df['e']) + df['c'] * (df['x_curr']**df['f']+df['e'])**2 + df['d'] * (df['x_curr']**df['f']+df['e'])**3
+        # Calculate power-transformed cubic function cost curves 
+        msk = df['eq'] == "power"
+        df['p_prev'] = 0.0
+        df_power = df[msk].copy()
+        df.loc[msk, 'p_prev'] = df_power['a'] + df_power['b'] * (df_power['x_prev']**df_power['f']+df_power['e']) + df_power['c'] * (df_power['x_prev']**df_power['f']+df_power['e'])**2 + df_power['d'] * (df_power['x_prev']**df_power['f']+df_power['e'])**3
+        df.loc[msk, 'p_curr'] = df_power['a'] + df_power['b'] * (df_power['x_curr']**df_power['f']+df_power['e']) + df_power['c'] * (df_power['x_curr']**df_power['f']+df_power['e'])**2 + df_power['d'] * (df_power['x_curr']**df_power['f']+df_power['e'])**3
+        # Calculate polynomial function cost curves 
+        msk = df['eq'] == "polyn"
+        df_polyn = df[msk].copy()
+        df.loc[msk, 'p_prev'] = df_polyn['f'] + df_polyn['e'] * df_polyn['x_prev'] + df_polyn['d'] * df_polyn['x_prev']**2 + df_polyn['c'] * df_polyn['x_prev']**3 + df_polyn['b'] * df_polyn['x_prev']**4 + df_polyn['a'] * df_polyn['x_prev']**5
+        df.loc[msk, 'p_curr'] = df_polyn['f'] + df_polyn['e'] * df_polyn['x_curr'] + df_polyn['d'] * df_polyn['x_curr']**2 + df_polyn['c'] * df_polyn['x_curr']**3 + df_polyn['b'] * df_polyn['x_curr']**4 + df_polyn['a'] * df_polyn['x_curr']**5
+
 
         p_min = 0.01
         df['p_prev'] = df['p_prev'].clip(lower=p_min)

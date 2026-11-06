@@ -14,7 +14,7 @@ import os
 import time
 
 GLORIA_SECTOR_ROLES = {
-    'cost_curve': [24, 25, 26],
+    'cost_curve': [24, 25, 26, 27],
     'refining': [62, 63, 94],
     'non_market': [115, 116, 117, 118],
     'royalty': list(range(22, 41)),
