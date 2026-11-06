@@ -10,8 +10,6 @@ from SourceCode.utils import MRIO_df_to_vec, MRIO_vec_to_df, MRIO_mat_to_df
 
 class normal_output_mod:
     def __init__(self, EXOG_VARS):
-        self.LABOR_BASE = EXOG_VARS.LABOR_BASE
-        self.VA_BASE = EXOG_VARS.VA_BASE
         self.output = EXOG_VARS.output
         self.R = EXOG_VARS.R
         self.P = EXOG_VARS.P

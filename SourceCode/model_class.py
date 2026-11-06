@@ -245,6 +245,18 @@ class ModelRun:
         self.COND_PRICE = int(config.get('settings','COND_PRICE')) / 100
         self.ITER_MAX = int(config.get('settings','ITER_MAX'))
 
+        # calibration stopping rule (all optional). Errors are fractions of projected
+        # output, i.e. roughly the missing growth in percentage points / 100.
+        #   CALIB_COUNTRY_TOL: max |net country error|
+        #   CALIB_SECTOR_TOL:  output-weighted mean |cell error| = sum|resid| / sum(projected)
+        #   CALIB_ITER_MAX:    stop (keeping current residuals) after this many iterations
+        self.CALIB_COUNTRY_TOL = float(config.get('settings', 'CALIB_COUNTRY_TOL', fallback=0.002))
+        self.CALIB_SECTOR_TOL = float(config.get('settings', 'CALIB_SECTOR_TOL', fallback=0.01))
+        self.CALIB_ITER_MAX = int(config.get('settings', 'CALIB_ITER_MAX', fallback=15))
+        #   CALIB_PATIENCE: revert to the best residuals after this many consecutive iterations
+        #                   that fail to improve the worst-country error
+        self.CALIB_PATIENCE = int(config.get('settings', 'CALIB_PATIENCE', fallback=3))
+
         self.WRITE_AT_END = config.getboolean('settings', 'WRITE_AT_END')
         
         self.ftt_model = None
@@ -700,8 +712,8 @@ class ModelRun:
         Column set mirrors check_calibration_convergence.py
         and adds exit_reason / iters / best_iter / final_step_size.
         """
-        COUNTRY_THRESHOLD = 0.02
-        SECTOR_THRESHOLD = 0.10
+        COUNTRY_THRESHOLD = self.CALIB_COUNTRY_TOL
+        SECTOR_THRESHOLD = self.CALIB_SECTOR_TOL
         R_list = EXOG_VARS.R_list
         P_list = EXOG_VARS.P_list
         n_R = len(R_list)
@@ -737,7 +749,9 @@ class ModelRun:
             cell_frac = np.where(proj != 0, best_residual_q / proj, 0.0)
         cell_frac = np.nan_to_num(cell_frac, nan=0.0, posinf=0.0, neginf=0.0)
         abs_cell = np.abs(cell_frac)
-        sector_mean_abs_err = float(abs_cell.mean()) if abs_cell.size else 0.0
+        # output-weighted mean |cell error| (same metric as the loop's stopping rule)
+        proj_total = float(np.sum(proj))
+        sector_mean_abs_err = float(np.sum(np.abs(best_residual_q)) / proj_total) if proj_total > 0 else 0.0
 
         # --- country-level: max over regions of |sum(res)/sum(proj)| -----
         abs_check_country = np.abs(np.asarray(best_check_country, dtype=float))
@@ -804,6 +818,23 @@ class ModelRun:
         }
         pd.DataFrame([row])[self._CALIB_SUMMARY_COLS].to_csv(
             self._CALIB_SUMMARY_PATH, mode="a", header=False, index=False)
+
+    def _log_calibration_iteration(self, year, iteration, action, check_country, sector_w_err,
+                                   step, R_list):
+        """Append one row per calibration iteration to Residuals/calibration_iterations.csv
+        (signed country errors = residual / projected output; positive = model below target).
+        Residuals/ is archived at the start of every calibrating run, so the file starts fresh."""
+        path = os.path.join("Residuals", "calibration_iterations.csv")
+        errs = np.asarray(check_country, dtype=float)
+        row = {"year": year, "iter": iteration, "action": action,
+               "country_max_abs_err": float(np.max(np.abs(errs))) if errs.size else 0.0,
+               "sector_w_err": float(sector_w_err), "step": step}
+        row.update({f"err_{r}": float(e) for r, e in zip(R_list, errs)})
+        try:
+            pd.DataFrame([row]).to_csv(path, mode="a", index=False,
+                                       header=not os.path.exists(path))
+        except Exception as _e:
+            print("CALIBRATION                       WARN: failed to write iteration log: {}".format(_e))
 
     def run(self):
 
@@ -892,6 +923,10 @@ class ModelRun:
             'iter0_y': np.zeros((len(EXOG_VARS.R)*len(EXOG_VARS.P))),
             'check_sector': np.zeros((len(EXOG_VARS.R)*len(EXOG_VARS.P))),
             'country_check_prev': np.inf,
+            # best iteration so far (worst-country error and the residuals that produced it)
+            'best_err': np.inf,
+            'best_residuals': None,
+            'worse_count': 0,
             'calibrated_w_errors': False,
             'dynamic': None
         }
@@ -963,12 +998,42 @@ class ModelRun:
                 print("CALIBRATION                       iteration #{}".format(calibration_counter))
         
                 print(MRIO_vec_to_df(check,'% diff',len(EXOG_VARS.P_list),EXOG_VARS.R).sort_values(by="% diff"))
+                # output-weighted mean |cell error|; the unweighted mean is dominated by tiny sectors
+                _proj_total = float(np.nansum(projected_q))
+                sector_w_err = float(np.nansum(np.abs(residual_q)) / _proj_total) if _proj_total > 0 else 0.0
                 print("CALIBRATION                       Mean abs diff per sector: {}".format(np.mean(np.abs(check))))
+                print("CALIBRATION                       Output-weighted abs diff: {}".format(sector_w_err))
                 print("CALIBRATION                       Max abs diff by country: {}".format(np.max(np.abs(check_country))))
                 print("CALIBRATION                       Prev iteration: {}".format(CALIBRATION_VARS['country_check_prev']))
-        
-                # max diff in sector 10%, max diff in country 1%
-                if (((np.max(np.abs(check_country)) < 0.02) & (np.mean(np.abs(check)) < 0.10) & (calibration_counter > 0)) | (ERROR == True)):
+
+                # stop when country and weighted-sector errors are within tolerance (CALIB_*_TOL),
+                # on a revert (ERROR), or at the iteration cap (keeps the current residuals)
+                _tol_met = ((np.max(np.abs(check_country)) < self.CALIB_COUNTRY_TOL)
+                            & (sector_w_err < self.CALIB_SECTOR_TOL) & (calibration_counter > 0))
+                _max_iter = (calibration_counter >= self.CALIB_ITER_MAX) and not ERROR
+
+                # track the best iteration (lowest worst-country error); the residuals currently in
+                # CALIBRATION_VARS are the ones that produced this iteration's error
+                _err_now = float(np.max(np.abs(check_country)))
+                if (not ERROR):
+                    if _err_now < CALIBRATION_VARS['best_err']:
+                        CALIBRATION_VARS['best_err'] = _err_now
+                        CALIBRATION_VARS['best_residuals'] = {k: CALIBRATION_VARS[k].copy() for k in
+                                                              ('residual_fd_hh', 'residual_fd_gov', 'residual_fd_fcf')}
+                        CALIBRATION_VARS['worse_count'] = 0
+                    else:
+                        CALIBRATION_VARS['worse_count'] += 1
+
+                if _tol_met | _max_iter | (ERROR == True):
+                    _action = "error_revert" if ERROR else ("converged" if _tol_met else "max_iter")
+                    if (_action == "max_iter") and (CALIBRATION_VARS['best_residuals'] is not None) \
+                            and (CALIBRATION_VARS['best_err'] < _err_now):
+                        # the last iteration was not the best one: keep the best residuals
+                        for k, v in CALIBRATION_VARS['best_residuals'].items():
+                            CALIBRATION_VARS[k] = v
+                        _action = "max_iter_best"
+                    self._log_calibration_iteration(year, calibration_counter, _action, check_country,
+                                                    sector_w_err, 0.5, EXOG_VARS.R_list)
                     # ???????????????????????????????
                     # ? CALIBRATED SUCCESS (or exit via ERROR revert)
                     # ???????????????????????????????
@@ -984,14 +1049,14 @@ class ModelRun:
                     # ??? Reports on the final iteration's state since there
                     # ??? is no best-iteration tracking anymore.
                     try:
-                        _exit_reason = "error_revert" if ERROR else "converged"
+                        _exit_reason = _action
                         self._append_calibration_summary_row(
                             year=year,
                             best_residual_df=residual_df,
                             best_projected_q=projected_q,
                             best_check_country=check_country,
                             best_country_max=float(np.max(np.abs(check_country))),
-                            best_sector_mean=float(np.mean(np.abs(check))),
+                            best_sector_mean=sector_w_err,
                             exit_reason=_exit_reason,
                             iters=calibration_counter,
                             best_iter=calibration_counter,
@@ -1005,13 +1070,14 @@ class ModelRun:
                               "summary row for {}: {}".format(year, _e))
                     break
 
-                if (np.max(np.abs(check_country)) > CALIBRATION_VARS['country_check_prev'])  & (calibration_counter > 0):
+                if (CALIBRATION_VARS['worse_count'] >= self.CALIB_PATIENCE) & (calibration_counter > 0):
                     # ???????????????????????????????
-                    # ? NON-convergence
+                    # ? NON-convergence: CALIB_PATIENCE iterations in a row without
+                    # ? improving on the best iteration -> go back to the best residuals
                     # ???????????????????????????????
-                    CALIBRATION_VARS['residual_fd_hh'] = CALIBRATION_VARS['residual_fd_hh_prev']
-                    CALIBRATION_VARS['residual_fd_gov'] = CALIBRATION_VARS['residual_fd_gov_prev']
-                    CALIBRATION_VARS['residual_fd_fcf'] = CALIBRATION_VARS['residual_fd_fcf_prev']
+                    if CALIBRATION_VARS['best_residuals'] is not None:
+                        for k, v in CALIBRATION_VARS['best_residuals'].items():
+                            CALIBRATION_VARS[k] = v
 
                     # ! reverting to iteration 0 means the residuals are still the
                     # ! empty placeholders, so this year would be solved with (and
@@ -1034,12 +1100,16 @@ class ModelRun:
                                   "year's calibration and none available for {}.".format(year - 1))
 
                     ERROR = True
+                    self._log_calibration_iteration(year, calibration_counter, "worse_revert", check_country,
+                                                    sector_w_err, 0.5, EXOG_VARS.R_list)
 
                     print("CALIBRATION                       Calibration did not converge, errors saved.")
                     continue
 
                 # ? [0.5] multiplier has been added to get rid of oscillation behaviour in calibration
                 # ? this decreases steps so more smooth calibration
+                self._log_calibration_iteration(year, calibration_counter, "step", check_country,
+                                                sector_w_err, 0.5, EXOG_VARS.R_list)
                 fd_vec = IO_model.calc_fd_vec(residual_q, IO_model.y0) * 0.5
                 
                 #%%
@@ -1081,11 +1151,26 @@ class ModelRun:
                 fd_df['VIGA_new'] = fd_df['total_row'] * fd_df['gov_share']
                 fd_df['VDFA_new'] = fd_df['total_row'] * fd_df['fcf_share']
         
-                # make sure that consumption per row doesn't go negative
+                # ! the increment above is a correction on top of the residual that is currently applied
+                # ! (residual_q is the error left WITH it), so the new residual = current residual +
+                # ! increment. Replacing it (as before) threw the previous step away, so the error
+                # ! bounced back up at iteration 2 and the loop reverted.
+                for _new, _base, _key in (('VIPA_new', 'VIPA', 'residual_fd_hh'),
+                                          ('VIGA_new', 'VIGA', 'residual_fd_gov'),
+                                          ('VDFA_new', 'VDFA', 'residual_fd_fcf')):
+                    _cur = CALIBRATION_VARS[_key]
+                    if len(_cur) > 0:
+                        _cur = _cur[[_base]].rename(columns={_base: '_cur_res'}).reset_index()
+                        fd_df = fd_df.merge(_cur, how='left', on=['REG_exp', 'REG_imp', 'TRAD_COMM'])
+                        fd_df['_cur_res'] = fd_df['_cur_res'].fillna(0.0)
+                        fd_df[_new] = fd_df[_new] + fd_df['_cur_res']
+                        fd_df = fd_df.drop(columns=['_cur_res'])
+
+                # make sure that consumption per row doesn't go negative (base consumption + total residual)
                 fd_df.loc[(fd_df['VIGA_new'] + fd_df['VIGA']) < 0.0, 'VIGA_new'] = fd_df.loc[(fd_df['VIGA_new'] + fd_df['VIGA']) < 0.0, 'VIGA'] * -0.9
                 fd_df.loc[(fd_df['VIPA_new'] + fd_df['VIPA']) < 0.0, 'VIPA_new'] = fd_df.loc[(fd_df['VIPA_new'] + fd_df['VIPA']) < 0.0, 'VIPA'] * -0.9
                 fd_df.loc[(fd_df['VDFA_new'] + fd_df['VDFA']) < 0.0, 'VDFA_new'] = fd_df.loc[(fd_df['VDFA_new'] + fd_df['VDFA']) < 0.0, 'VDFA'] * -0.9
-        
+
                 fd_df = fd_df.drop(columns=['VIPA','VIGA','VDFA']).rename(columns={'VIGA_new':'VIGA','VIPA_new':'VIPA','VDFA_new':'VDFA'})
         
                 fd_hh = fd_df[['REG_exp','REG_imp','TRAD_COMM','VIPA']].set_index(['REG_exp','REG_imp','TRAD_COMM'])
