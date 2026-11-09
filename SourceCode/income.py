@@ -59,7 +59,7 @@ class income:
         # Estimated per percentage point of unemployment; the model's unemployment rate is a fraction, hence * 100.
         # Stability bounds are applied to parameters.csv by DATA/bound_parameters.py.
         self.params['UNEMP_ln_L1'] = load_param('wage_UNEMP_ln_L1') * 100
-        self.params['W_avg_ln_L1'] = load_param("wage_W_avg_ln_L1")
+        # wage_W_avg_ln_L1 (national average wage) is no longer estimated or read (2026-11-06); it was loaded but never used.
 
     def load_dynamic(self, vars_):
         self.common = {}
