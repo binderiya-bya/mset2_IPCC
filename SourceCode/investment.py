@@ -190,7 +190,7 @@ class invest:
         
         # interest_rate = 0.05 + 0.5 * [diff from inflation target] + 0.5 * [output gap]
         interest_rate['interest_rate'] = interest_rate['dp_prev1'] + 0.5 * (interest_rate['dp_prev1'] - interest_rate['inflation_target']) + 0.5 * (interest_rate['output_gap'])
-        interest_rate['interest_rate'] = np.maximum(interest_rate['interest_rate'], 0.1)
+        interest_rate['interest_rate'] = np.maximum(interest_rate['interest_rate'], 0.005) # minimum 0.5 interest
         interest_rate['interest_rate_real'] = (interest_rate['interest_rate'] - interest_rate['dp_prev1']) / (1 + interest_rate['dp_prev1']) # 0.02 is 2%
 
         interest_rate['interest_rate_prev'] = 0.005 + 0.5 * (interest_rate['dp_prev2'] - interest_rate['inflation_target_prev']) + 0.5 * (interest_rate['output_gap_prev'])
