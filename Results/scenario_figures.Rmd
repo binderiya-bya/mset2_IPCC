@@ -23,7 +23,7 @@ params:
   # scenario results folder, relative to Results/ ("." = current, or e.g. archive_scenario_cprice_disagg_YYYYMMDD_HHMM); the PDF is written there
   baseline_dir: "."   # change here! 
   # baseline results folder to compare against, relative to Results/
-  scenario: ""        # one scenario name, or "" for every scenario in results_dir
+  scenario: "IEA_CP"        # one scenario name, or "" for every scenario in results_dir
 knit: (function(input, ...) {
     p <- rmarkdown::yaml_front_matter(input)$params;
     d <- file.path(dirname(input), p$results_dir);
@@ -123,14 +123,14 @@ names(read_csv(files[1]))
 ```{r Load data#2 - 2D vars,include=FALSE}
 # read_and_prefix <- function(filename) {
 #   res <- read_parquet(filename, show_col_types = FALSE) %>%
-#     mutate(scenario=str_extract(basename(filename), "(?<=results\\_file\\_long\\_)[a-z_]{1,}")) %>% 
+#     mutate(scenario=str_extract(basename(filename), "(?<=results\\_file\\_long\\_)[A-Za-z_]{1,}")) %>% 
 #     filter(!is.na(energy_flows)) %>% filter(year > 2025 & REG_imp == 'SAS') %>% filter(energy_flows > 0)
 #   return(res)
 # }
 
 read_and_prefix <- function(filename) {
   res <- read_csv(filename, show_col_types = FALSE) %>%
-    mutate(scenario=str_extract(basename(filename), "(?<=results\\_file\\_long\\_)[a-z_]{1,}"))
+    mutate(scenario=str_extract(basename(filename), "(?<=results\\_file\\_long\\_)[A-Za-z_]{1,}"))
   return(res)
 }
 
@@ -1250,7 +1250,7 @@ names(read_csv(files[1]))
 
 read_and_prefix <- function(filename) {
   res <- read_csv(filename, show_col_types = FALSE) %>%
-    mutate(scenario=str_extract(basename(filename), "(?<=results\\_file\\_long\\_)[a-z_]{1,}"))
+    mutate(scenario=str_extract(basename(filename), "(?<=results\\_file\\_long\\_)[A-Za-z_]{1,}"))
   return(res)
 }
 
@@ -1310,13 +1310,13 @@ df1 <- df %>%
   mutate(value = round(value, digits=2)) %>%
   mutate(value = scales::percent(value)) %>%
     filter(year %in% c(2019,2025,2030,2040,2050)) %>%
+  mutate(var_name = recode(var_name, unemployment_rate = "Unemployment rate (%)", shadow_unemployment_rate = "Shadow unemployment rate (%)")) %>%
   pivot_wider(id_cols=c('REG_imp','scenario'), names_from=c('year','var_name'), values_from='value')
 
 df1 %>%
   rename(Region = REG_imp) %>%
   kbl(booktabs=TRUE, col.names = NULL) %>%
-  add_header_above(c(" " = 1, " "=1, "2019"=1,"2025" = 1, "2030" = 1, "2040" = 1, "2050"=1, "2019"=1,"2025" = 1, "2030" = 1, "2040" = 1,"2050"=1)) %>%
-  add_header_above(c(" " = 2, "Shadow unemployment rate (%)" = 5, "Unemployment rate (%)" = 5)) %>%
+  pivot_header(df1, n_id = 2) %>%
   kable_styling(latex_options = c("striped", "scale_down","HOLD_position"))
 ```
 

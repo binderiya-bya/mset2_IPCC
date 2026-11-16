@@ -68,6 +68,20 @@ rfiles <- function(pattern) {   # baseline result files in params$results_dir
   f <- list.files(params$results_dir, pattern = pattern, full.names = TRUE)
   f[scen_of(f) %in% baseline_name]
 }
+
+# Two header rows for a table pivoted with names_from = c(<a>, <b>) (columns "<a>_<b>"), built from the table's own
+# columns so tables work for any run length (e.g. model_end = 2030) and any sector aggregation.
+# Drop header groups with no columns (e.g. no 2025+ values in a short or broken run), which LaTeX cannot typeset.
+header_groups <- function(h) h[h > 0]
+pivot_header <- function(k, tab, n_id = 1, id_labels = rep(" ", n_id)) {
+  cols  <- names(tab)[-seq_len(n_id)]
+  yr    <- sub("_.*$", "", cols)
+  other <- sub("_$", "", sub("^[^_]*_", "", cols))
+  if (all(rle(yr)$lengths == 1)) { lower <- yr; up <- rle(other) } else { lower <- other; up <- rle(yr) }
+  k %>%
+    add_header_above(c(setNames(rep(1, n_id), id_labels), setNames(rep(1, length(lower)), lower))) %>%
+    add_header_above(c(setNames(n_id, " "), setNames(up$lengths, up$values)))
+}
 ```
 
 # 2D variables
@@ -156,12 +170,12 @@ df1 <- df %>%
   mutate(value = round(value, digits=0)) %>%
   mutate(value = scales::comma(value)) %>%
   pivot_wider(id_cols='REG_imp', names_from='year', values_from='value') %>%
-  select(REG_imp, '2019', '2025', '2030', '2040', '2050')
+  select(REG_imp, any_of(c('2019', '2025', '2030', '2040', '2050')))
 
 df2 <- df %>% group_by(REG_imp) %>%
   mutate(value_g = value/dplyr::lag(value) - 1) %>%
   mutate(value_g = value_g * 100) %>%
-  mutate(period = ifelse(year < 2031, "2019-2030", "2031-2050")) %>%
+  mutate(period = ifelse(year < 2031, "2019-2030", paste0("2031-", max(df$year)))) %>%
   group_by(REG_imp, period) %>%
   summarise(value_g_avg = mean(value_g, na.rm=T)) %>% 
   mutate(value_g_avg = round(value_g_avg, digits=2)) %>%
@@ -171,7 +185,7 @@ df1 %>% left_join(df2) %>%
   rename(Region = REG_imp) %>%
   kbl(booktabs=TRUE) %>%
       # digits = 0, format.args = list(big.mark = ",")) %>%
-  add_header_above(c(" " = 1, "Absolute value" = 5, "Average growth %" = 2)) %>%
+  add_header_above(header_groups(c(" " = 1, "Absolute value" = ncol(df1) - 1, "Average growth %" = ncol(df2) - 1))) %>%
   kable_styling(latex_options = c("striped", "scale_down","HOLD_position"))
 ```
 
@@ -235,12 +249,12 @@ df1 <- df %>%
   mutate(value = round(value, digits=0)) %>%
   mutate(value = scales::comma(value)) %>%
   pivot_wider(id_cols='REG_imp', names_from='year', values_from='value') %>%
-  select(REG_imp, '2019', '2025', '2030', '2040', '2050')
+  select(REG_imp, any_of(c('2019', '2025', '2030', '2040', '2050')))
 
 df2 <- df %>% group_by(REG_imp) %>%
   mutate(value_g = value/dplyr::lag(value) - 1) %>%
   mutate(value_g = value_g * 100) %>%
-  mutate(period = ifelse(year < 2031, "2019-2030", "2031-2050")) %>%
+  mutate(period = ifelse(year < 2031, "2019-2030", paste0("2031-", max(df$year)))) %>%
   group_by(REG_imp, period) %>%
   summarise(value_g_avg = mean(value_g, na.rm=T)) %>% 
   mutate(value_g_avg = round(value_g_avg, digits=2)) %>%
@@ -250,7 +264,7 @@ df1 %>% left_join(df2) %>%
   rename(Region = REG_imp) %>%
   kbl(booktabs=TRUE) %>%
       # digits = 0, format.args = list(big.mark = ",")) %>%
-  add_header_above(c(" " = 1, "Absolute value" = 5, "Average growth %" = 2)) %>%
+  add_header_above(header_groups(c(" " = 1, "Absolute value" = ncol(df1) - 1, "Average growth %" = ncol(df2) - 1))) %>%
   kable_styling(latex_options = c("striped", "scale_down","HOLD_position"))
 ```
 
@@ -291,12 +305,12 @@ df <- combined_data %>%
 
 df1 <- df %>%
   pivot_wider(id_cols='REG_imp', names_from='year', values_from='labor_productivity') %>%
-  select(REG_imp, '2019', '2025', '2030', '2040', '2050')
+  select(REG_imp, any_of(c('2019', '2025', '2030', '2040', '2050')))
 
 df2 <- df %>% group_by(REG_imp) %>%
   mutate(labour_prod_g = labor_productivity/dplyr::lag(labor_productivity) - 1) %>%
   mutate(labour_prod_g = labour_prod_g * 100) %>%
-  mutate(period = ifelse(year < 2031, "2019-2030", "2031-2050")) %>%
+  mutate(period = ifelse(year < 2031, "2019-2030", paste0("2031-", max(df$year)))) %>%
   group_by(REG_imp, period) %>%
   summarise(labor_prod_g_avg = mean(labour_prod_g, na.rm=T)) %>% 
   pivot_wider(id_cols='REG_imp', names_from='period', values_from='labor_prod_g_avg')
@@ -304,7 +318,7 @@ df2 <- df %>% group_by(REG_imp) %>%
 df1 %>% left_join(df2) %>%
   rename(Region = REG_imp) %>%
   kbl(booktabs=TRUE, digits = 1, format.args = list(big.mark = ",")) %>%
-  add_header_above(c(" " = 1, "Absolute value" = 5, "Average growth" = 2)) %>%
+  add_header_above(header_groups(c(" " = 1, "Absolute value" = ncol(df1) - 1, "Average growth" = ncol(df2) - 1))) %>%
   kable_styling(latex_options = c("striped", "scale_down","HOLD_position"))
 ```
 
@@ -345,12 +359,12 @@ df1 <- df %>%
   mutate(value = round(value, digits=0)) %>%
   mutate(value = scales::comma(value)) %>%
   pivot_wider(id_cols='REG_imp', names_from='year', values_from='value') %>%
-  select(REG_imp, '2019', '2025', '2030', '2040', '2050')
+  select(REG_imp, any_of(c('2019', '2025', '2030', '2040', '2050')))
 
 df2 <- df %>% group_by(REG_imp) %>%
   mutate(value_g = value/dplyr::lag(value) - 1) %>%
   mutate(value_g = value_g * 100) %>%
-  mutate(period = ifelse(year < 2031, "2019-2030", "2031-2050")) %>%
+  mutate(period = ifelse(year < 2031, "2019-2030", paste0("2031-", max(df$year)))) %>%
   group_by(REG_imp, period) %>%
   summarise(value_g_avg = mean(value_g, na.rm=T)) %>% 
   mutate(value_g_avg = round(value_g_avg, digits=2)) %>%
@@ -360,7 +374,7 @@ df1 %>% left_join(df2) %>%
   rename(Region = REG_imp) %>%
   kbl(booktabs=TRUE) %>%
       # digits = 0, format.args = list(big.mark = ",")) %>%
-  add_header_above(c(" " = 1, "Absolute value" = 5, "Average growth %" = 2)) %>%
+  add_header_above(header_groups(c(" " = 1, "Absolute value" = ncol(df1) - 1, "Average growth %" = ncol(df2) - 1))) %>%
   kable_styling(latex_options = c("striped", "scale_down","HOLD_position"))
 ```
 
@@ -400,12 +414,12 @@ df1 <- df %>%
   mutate(value = round(value, digits=0)) %>%
   mutate(value = scales::comma(value)) %>%
   pivot_wider(id_cols='REG_imp', names_from='year', values_from='value') %>%
-  select(REG_imp, '2019', '2025', '2030', '2040', '2050')
+  select(REG_imp, any_of(c('2019', '2025', '2030', '2040', '2050')))
 
 df2 <- df %>% group_by(REG_imp) %>%
   mutate(value_g = value/dplyr::lag(value) - 1) %>%
   mutate(value_g = value_g * 100) %>%
-  mutate(period = ifelse(year < 2031, "2019-2030", "2031-2050")) %>%
+  mutate(period = ifelse(year < 2031, "2019-2030", paste0("2031-", max(df$year)))) %>%
   group_by(REG_imp, period) %>%
   summarise(value_g_avg = mean(value_g, na.rm=T)) %>% 
   mutate(value_g_avg = round(value_g_avg, digits=2)) %>%
@@ -415,7 +429,7 @@ df1 %>% left_join(df2) %>%
   rename(Region = REG_imp) %>%
   kbl(booktabs=TRUE) %>%
       # digits = 0, format.args = list(big.mark = ",")) %>%
-  add_header_above(c(" " = 1, "Absolute value" = 5, "Average growth %" = 2)) %>%
+  add_header_above(header_groups(c(" " = 1, "Absolute value" = ncol(df1) - 1, "Average growth %" = ncol(df2) - 1))) %>%
   kable_styling(latex_options = c("striped", "scale_down","HOLD_position"))
 ```
 
@@ -456,12 +470,12 @@ df <- combined_data %>%
 
 df1 <- df %>%
   pivot_wider(id_cols='REG_imp', names_from='year', values_from='capital_productivity') %>%
-  select(REG_imp, '2019', '2025', '2030', '2040', '2050')
+  select(REG_imp, any_of(c('2019', '2025', '2030', '2040', '2050')))
 
 df2 <- df %>% group_by(REG_imp) %>%
   mutate(capital_prod_g = capital_productivity/dplyr::lag(capital_productivity) - 1) %>%
   mutate(capital_prod_g = capital_prod_g * 100) %>%
-  mutate(period = ifelse(year < 2031, "2019-2030", "2031-2050")) %>%
+  mutate(period = ifelse(year < 2031, "2019-2030", paste0("2031-", max(df$year)))) %>%
   group_by(REG_imp, period) %>%
   summarise(capital_prod_g_avg = mean(capital_prod_g, na.rm=T)) %>% 
   pivot_wider(id_cols='REG_imp', names_from='period', values_from='capital_prod_g_avg')
@@ -469,7 +483,7 @@ df2 <- df %>% group_by(REG_imp) %>%
 df1 %>% left_join(df2) %>%
   rename(Region = REG_imp) %>%
   kbl(booktabs=TRUE, digits = 2, format.args = list(big.mark = ",")) %>%
-  add_header_above(c(" " = 1, "Absolute value" = 5, "Average growth" = 2)) %>%
+  add_header_above(header_groups(c(" " = 1, "Absolute value" = ncol(df1) - 1, "Average growth" = ncol(df2) - 1))) %>%
   kable_styling(latex_options = c("striped", "scale_down","HOLD_position"))
 ```
 
@@ -518,12 +532,12 @@ df <- combined_data %>%
 df1 <- df %>%
   mutate(value = round(value, digits=1)) %>%
   pivot_wider(id_cols='REG_imp', names_from='year', values_from='value') %>%
-  select(REG_imp, '2019', '2025', '2030', '2040', '2050')
+  select(REG_imp, any_of(c('2019', '2025', '2030', '2040', '2050')))
 
 df2 <- df %>% group_by(REG_imp) %>%
   mutate(value_g = value/dplyr::lag(value) - 1) %>%
   mutate(value_g = value_g * 100) %>%
-  mutate(period = ifelse(year < 2031, "2019-2030", "2031-2050")) %>%
+  mutate(period = ifelse(year < 2031, "2019-2030", paste0("2031-", max(df$year)))) %>%
   group_by(REG_imp, period) %>%
   summarise(value_g_avg = mean(value_g, na.rm=T)) %>% 
   mutate(value_g_avg = round(value_g_avg, digits=2)) %>%
@@ -533,7 +547,7 @@ df1 %>% left_join(df2) %>%
   rename(Region = REG_imp) %>%
   kbl(booktabs=TRUE) %>%
       # digits = 0, format.args = list(big.mark = ",")) %>%
-  add_header_above(c(" " = 1, "Absolute value" = 5, "Average inflation %" = 2)) %>%
+  add_header_above(header_groups(c(" " = 1, "Absolute value" = ncol(df1) - 1, "Average inflation %" = ncol(df2) - 1))) %>%
   kable_styling(latex_options = c("striped", "scale_down","HOLD_position"))
 ```
 
@@ -573,12 +587,12 @@ df <- combined_data %>%
 
 df1 <- df %>%
   pivot_wider(id_cols='REG_imp', names_from='year', values_from='wage') %>%
-  select(REG_imp, '2019', '2025', '2030', '2040', '2050')
+  select(REG_imp, any_of(c('2019', '2025', '2030', '2040', '2050')))
 
 df2 <- df %>% group_by(REG_imp) %>%
   mutate(wage_g = wage/dplyr::lag(wage) - 1) %>%
   mutate(wage_g = wage_g * 100) %>%
-  mutate(period = ifelse(year < 2031, "2019-2030", "2031-2050")) %>%
+  mutate(period = ifelse(year < 2031, "2019-2030", paste0("2031-", max(df$year)))) %>%
   group_by(REG_imp, period) %>%
   summarise(wage_g_avg = mean(wage_g, na.rm=T)) %>% 
   pivot_wider(id_cols='REG_imp', names_from='period', values_from='wage_g_avg')
@@ -586,7 +600,7 @@ df2 <- df %>% group_by(REG_imp) %>%
 df1 %>% left_join(df2) %>%
   rename(Region = REG_imp) %>%
   kbl(booktabs=TRUE, digits = 2, format.args = list(big.mark = ",")) %>%
-  add_header_above(c(" " = 1, "Absolute value" = 5, "Average growth" = 2)) %>%
+  add_header_above(header_groups(c(" " = 1, "Absolute value" = ncol(df1) - 1, "Average growth" = ncol(df2) - 1))) %>%
   kable_styling(latex_options = c("striped", "scale_down","HOLD_position"))
 ```
 
@@ -641,7 +655,7 @@ df <- combined_data %>%
 df2 <- df %>% group_by(REG_imp, PROD_COMM) %>%
   mutate(value_g = value/dplyr::lag(value) - 1) %>%
   mutate(value_g = value_g * 100) %>%
-  mutate(period = ifelse(year < 2031, "2019-2030", "2031-2050")) %>%
+  mutate(period = ifelse(year < 2031, "2019-2030", paste0("2031-", max(df$year)))) %>%
   group_by(REG_imp, PROD_COMM, period) %>%
   summarise(value_g_avg = mean(value_g, na.rm=T)) %>% 
   mutate(value_g_avg = round(value_g_avg, digits=2)) %>%
@@ -652,8 +666,7 @@ df2 %>%
   rename(Region = REG_imp) %>%
   kbl(booktabs=TRUE, col.names = NULL) %>%
       # digits = 0, format.args = list(big.mark = ",")) %>%
-  add_header_above(c("Region" = 1, "2019-2030", "2031-2050","2019-2030", "2031-2050","2019-2030", "2031-2050","2019-2030", "2031-2050")) %>%
-  add_header_above(c(" " = 1, "Coal (24)" = 2, "Coal (25)" = 2, "Gas (27)" = 2, "Petrol (26)" = 2)) %>%
+  pivot_header(df2, id_labels = "Region") %>%
   kable_styling(latex_options = c("striped", "scale_down","HOLD_position"))
 ```
 
@@ -758,12 +771,12 @@ df1 <- df %>%
   mutate(value = round(value, digits=2)) %>%
   mutate(value = scales::comma(value, accuracy=.01)) %>%
   pivot_wider(id_cols='REG_imp', names_from='year', values_from='value') %>%
-  select(REG_imp, '2025', '2030', '2040', '2050')
+  select(REG_imp, any_of(c('2025', '2030', '2040', '2050')))
 
 df2 <- df %>% group_by(REG_imp) %>%
   mutate(value_g = value/dplyr::lag(value) - 1) %>%
   mutate(value_g = value_g * 100) %>%
-  mutate(period = ifelse(year < 2031, "2020-2030", "2031-2050")) %>%
+  mutate(period = ifelse(year < 2031, "2020-2030", paste0("2031-", max(df$year)))) %>%
   group_by(REG_imp, period) %>%
   summarise(value_g_avg = mean(value_g, na.rm=T)) %>% 
   mutate(value_g_avg = round(value_g_avg, digits=2)) %>%
@@ -773,7 +786,7 @@ df1 %>% left_join(df2) %>%
   rename(Region = REG_imp) %>%
   kbl(booktabs=TRUE) %>%
       # digits = 0, format.args = list(big.mark = ",")) %>%
-  add_header_above(c(" " = 1, "Absolute value (EJ)" = 4, "Average growth %" = 2)) %>%
+  add_header_above(header_groups(c(" " = 1, "Absolute value (EJ)" = ncol(df1) - 1, "Average growth %" = ncol(df2) - 1))) %>%
   kable_styling(latex_options = c("striped", "scale_down","HOLD_position"))
 ```
 
@@ -794,12 +807,12 @@ df1 <- df %>%
   mutate(value = round(value, digits=2)) %>%
   mutate(value = scales::comma(value, accuracy=.01)) %>%
   pivot_wider(id_cols='REG_imp', names_from='year', values_from='value') %>%
-  select(REG_imp, '2025', '2030', '2040', '2050')
+  select(REG_imp, any_of(c('2025', '2030', '2040', '2050')))
 
 df2 <- df %>% group_by(REG_imp) %>%
   mutate(value_g = value/dplyr::lag(value) - 1) %>%
   mutate(value_g = value_g * 100) %>%
-  mutate(period = ifelse(year < 2031, "2020-2030", "2031-2050")) %>%
+  mutate(period = ifelse(year < 2031, "2020-2030", paste0("2031-", max(df$year)))) %>%
   group_by(REG_imp, period) %>%
   summarise(value_g_avg = mean(value_g, na.rm=T)) %>% 
   mutate(value_g_avg = round(value_g_avg, digits=2)) %>%
@@ -809,7 +822,7 @@ df1 %>% left_join(df2) %>%
   rename(Region = REG_imp) %>%
   kbl(booktabs=TRUE) %>%
       # digits = 0, format.args = list(big.mark = ",")) %>%
-  add_header_above(c(" " = 1, "Absolute value (EJ)" = 4, "Average growth %" = 2)) %>%
+  add_header_above(header_groups(c(" " = 1, "Absolute value (EJ)" = ncol(df1) - 1, "Average growth %" = ncol(df2) - 1))) %>%
   kable_styling(latex_options = c("striped", "scale_down","HOLD_position"))
 ```
 
@@ -831,12 +844,12 @@ df1 <- df %>%
   mutate(value = round(value, digits=2)) %>%
   mutate(value = scales::comma(value, accuracy=.01)) %>%
   pivot_wider(id_cols='REG_imp', names_from='year', values_from='value') %>%
-  select(REG_imp, '2025', '2030', '2040', '2050')
+  select(REG_imp, any_of(c('2025', '2030', '2040', '2050')))
 
 df2 <- df %>% group_by(REG_imp) %>%
   mutate(value_g = value/dplyr::lag(value) - 1) %>%
   mutate(value_g = value_g * 100) %>%
-  mutate(period = ifelse(year < 2031, "2020-2030", "2031-2050")) %>%
+  mutate(period = ifelse(year < 2031, "2020-2030", paste0("2031-", max(df$year)))) %>%
   group_by(REG_imp, period) %>%
   summarise(value_g_avg = mean(value_g, na.rm=T)) %>% 
   mutate(value_g_avg = round(value_g_avg, digits=2)) %>%
@@ -846,7 +859,7 @@ df1 %>% left_join(df2) %>%
   rename(Region = REG_imp) %>%
   kbl(booktabs=TRUE) %>%
       # digits = 0, format.args = list(big.mark = ",")) %>%
-  add_header_above(c(" " = 1, "Absolute value (EJ)" = 4, "Average growth %" = 2)) %>%
+  add_header_above(header_groups(c(" " = 1, "Absolute value (EJ)" = ncol(df1) - 1, "Average growth %" = ncol(df2) - 1))) %>%
   kable_styling(latex_options = c("striped", "scale_down","HOLD_position"))
 ```
 
@@ -868,12 +881,12 @@ df1 <- df %>%
   mutate(value = round(value, digits=2)) %>%
   mutate(value = scales::comma(value, accuracy=.01)) %>%
   pivot_wider(id_cols='REG_imp', names_from='year', values_from='value') %>%
-  select(REG_imp, '2025', '2030', '2040', '2050')
+  select(REG_imp, any_of(c('2025', '2030', '2040', '2050')))
 
 df2 <- df %>% group_by(REG_imp) %>%
   mutate(value_g = value/dplyr::lag(value) - 1) %>%
   mutate(value_g = value_g * 100) %>%
-  mutate(period = ifelse(year < 2031, "2020-2030", "2031-2050")) %>%
+  mutate(period = ifelse(year < 2031, "2020-2030", paste0("2031-", max(df$year)))) %>%
   group_by(REG_imp, period) %>%
   summarise(value_g_avg = mean(value_g, na.rm=T)) %>% 
   mutate(value_g_avg = round(value_g_avg, digits=2)) %>%
@@ -883,7 +896,7 @@ df1 %>% left_join(df2) %>%
   rename(Region = REG_imp) %>%
   kbl(booktabs=TRUE) %>%
       # digits = 0, format.args = list(big.mark = ",")) %>%
-  add_header_above(c(" " = 1, "Absolute value (EJ)" = 4, "Average growth %" = 2)) %>%
+  add_header_above(header_groups(c(" " = 1, "Absolute value (EJ)" = ncol(df1) - 1, "Average growth %" = ncol(df2) - 1))) %>%
   kable_styling(latex_options = c("striped", "scale_down","HOLD_position"))
 ```
 
@@ -957,12 +970,12 @@ df1 <- df %>%
   mutate(value = round(value, digits=2)) %>%
   mutate(value = scales::comma(value, accuracy=.01)) %>%
   pivot_wider(id_cols='REG_exp', names_from='year', values_from='value') %>%
-  select(REG_exp, '2025', '2030', '2040', '2050')
+  select(REG_exp, any_of(c('2025', '2030', '2040', '2050')))
 
 df2 <- df %>% group_by(REG_exp) %>%
   mutate(value_g = value/dplyr::lag(value) - 1) %>%
   mutate(value_g = value_g * 100) %>%
-  mutate(period = ifelse(year < 2031, "2020-2030", "2031-2050")) %>%
+  mutate(period = ifelse(year < 2031, "2020-2030", paste0("2031-", max(df$year)))) %>%
   group_by(REG_exp, period) %>%
   summarise(value_g_avg = mean(value_g, na.rm=T)) %>% 
   mutate(value_g_avg = round(value_g_avg, digits=2)) %>%
@@ -972,7 +985,7 @@ df1 %>% left_join(df2) %>%
   rename(Region = REG_exp) %>%
   kbl(booktabs=TRUE) %>%
       # digits = 0, format.args = list(big.mark = ",")) %>%
-  add_header_above(c(" " = 1, "Absolute value (EJ)" = 4, "Average growth %" = 2)) %>%
+  add_header_above(header_groups(c(" " = 1, "Absolute value (EJ)" = ncol(df1) - 1, "Average growth %" = ncol(df2) - 1))) %>%
   kable_styling(latex_options = c("striped", "scale_down","HOLD_position"))
 ```
 
@@ -993,12 +1006,12 @@ df1 <- df %>%
   mutate(value = round(value, digits=2)) %>%
   mutate(value = scales::comma(value, accuracy=.01)) %>%
   pivot_wider(id_cols='REG_exp', names_from='year', values_from='value') %>%
-  select(REG_exp, '2025', '2030', '2040', '2050')
+  select(REG_exp, any_of(c('2025', '2030', '2040', '2050')))
 
 df2 <- df %>% group_by(REG_exp) %>%
   mutate(value_g = value/dplyr::lag(value) - 1) %>%
   mutate(value_g = value_g * 100) %>%
-  mutate(period = ifelse(year < 2031, "2020-2030", "2031-2050")) %>%
+  mutate(period = ifelse(year < 2031, "2020-2030", paste0("2031-", max(df$year)))) %>%
   group_by(REG_exp, period) %>%
   summarise(value_g_avg = mean(value_g, na.rm=T)) %>% 
   mutate(value_g_avg = round(value_g_avg, digits=2)) %>%
@@ -1008,7 +1021,7 @@ df1 %>% left_join(df2) %>%
   rename(Region = REG_exp) %>%
   kbl(booktabs=TRUE) %>%
       # digits = 0, format.args = list(big.mark = ",")) %>%
-  add_header_above(c(" " = 1, "Absolute value (EJ)" = 4, "Average growth %" = 2)) %>%
+  add_header_above(header_groups(c(" " = 1, "Absolute value (EJ)" = ncol(df1) - 1, "Average growth %" = ncol(df2) - 1))) %>%
   kable_styling(latex_options = c("striped", "scale_down","HOLD_position"))
 ```
 
@@ -1030,12 +1043,12 @@ df1 <- df %>%
   mutate(value = round(value, digits=2)) %>%
   mutate(value = scales::comma(value, accuracy=.01)) %>%
   pivot_wider(id_cols='REG_exp', names_from='year', values_from='value') %>%
-  select(REG_exp, '2025', '2030', '2040', '2050')
+  select(REG_exp, any_of(c('2025', '2030', '2040', '2050')))
 
 df2 <- df %>% group_by(REG_exp) %>%
   mutate(value_g = value/dplyr::lag(value) - 1) %>%
   mutate(value_g = value_g * 100) %>%
-  mutate(period = ifelse(year < 2031, "2020-2030", "2031-2050")) %>%
+  mutate(period = ifelse(year < 2031, "2020-2030", paste0("2031-", max(df$year)))) %>%
   group_by(REG_exp, period) %>%
   summarise(value_g_avg = mean(value_g, na.rm=T)) %>% 
   mutate(value_g_avg = round(value_g_avg, digits=2)) %>%
@@ -1045,7 +1058,7 @@ df1 %>% left_join(df2) %>%
   rename(Region = REG_exp) %>%
   kbl(booktabs=TRUE) %>%
       # digits = 0, format.args = list(big.mark = ",")) %>%
-  add_header_above(c(" " = 1, "Absolute value (EJ)" = 4, "Average growth %" = 2)) %>%
+  add_header_above(header_groups(c(" " = 1, "Absolute value (EJ)" = ncol(df1) - 1, "Average growth %" = ncol(df2) - 1))) %>%
   kable_styling(latex_options = c("striped", "scale_down","HOLD_position"))
 ```
 
@@ -1067,12 +1080,12 @@ df1 <- df %>%
   mutate(value = round(value, digits=2)) %>%
   mutate(value = scales::comma(value, accuracy=.01)) %>%
   pivot_wider(id_cols='REG_exp', names_from='year', values_from='value') %>%
-  select(REG_exp, '2025', '2030', '2040', '2050')
+  select(REG_exp, any_of(c('2025', '2030', '2040', '2050')))
 
 df2 <- df %>% group_by(REG_exp) %>%
   mutate(value_g = value/dplyr::lag(value) - 1) %>%
   mutate(value_g = value_g * 100) %>%
-  mutate(period = ifelse(year < 2031, "2020-2030", "2031-2050")) %>%
+  mutate(period = ifelse(year < 2031, "2020-2030", paste0("2031-", max(df$year)))) %>%
   group_by(REG_exp, period) %>%
   summarise(value_g_avg = mean(value_g, na.rm=T)) %>% 
   mutate(value_g_avg = round(value_g_avg, digits=2)) %>%
@@ -1082,7 +1095,7 @@ df1 %>% left_join(df2) %>%
   rename(Region = REG_exp) %>%
   kbl(booktabs=TRUE) %>%
       # digits = 0, format.args = list(big.mark = ",")) %>%
-  add_header_above(c(" " = 1, "Absolute value (EJ)" = 4, "Average growth %" = 2)) %>%
+  add_header_above(header_groups(c(" " = 1, "Absolute value (EJ)" = ncol(df1) - 1, "Average growth %" = ncol(df2) - 1))) %>%
   kable_styling(latex_options = c("striped", "scale_down","HOLD_position"))
 ```
 
@@ -1224,6 +1237,7 @@ df <- combined_data %>%
   # mutate(value = round(value, digits=0)) %>%
   mutate(value = scales::percent(value, accuracy=.1)) %>%
   filter(year %in% c(2019,2025,2030,2040,2050)) %>%
+  mutate(var_name = recode(var_name, unemployment_rate = "Unemployment rate", shadow_unemployment_rate = "Shadow unemployment rate")) %>%
   pivot_wider(id_cols='REG_imp', names_from=c('year','var_name'), values_from='value') 
 
 df %>%
@@ -1231,8 +1245,7 @@ df %>%
   # rename_at(vars(matches("^[0-9]{4}")), ~ str_extract(., "^[0-9]{4}"))
   kbl(booktabs=TRUE, col.names = NULL) %>%
       # digits = 0, format.args = list(big.mark = ",")) %>%
-  add_header_above(c(" " = 1, "2019" = 1, "2025" = 1, "2030" = 1, "2040" = 1, "2050" = 1, "2019" = 1, "2025" = 1, "2030" = 1, "2040" = 1, "2050" = 1)) %>%
-  add_header_above(c(" " = 1, "Unemployment rate" = 5, "Shadow unemployment rate" = 5)) %>%
+  pivot_header(df) %>%
   kable_styling(latex_options = c("striped", "scale_down","HOLD_position"))
 ```
 

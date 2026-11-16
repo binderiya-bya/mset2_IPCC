@@ -234,7 +234,7 @@ class exog_vars:
             return gloria_ids
         conc = self.sector_concordance()
         share = conc.groupby('Lfd_Nr_agg')['Lfd_Nr'].apply(lambda s: s.isin(gloria_ids).mean())
-        return [int(a) for a in share.index[share > 0.5]]
+        return [int(a) for a in share.index[share >= 0.5]]
 
     def sector_concordance(self):
         if getattr(self, 'SECTOR_CONCORDANCE', None) is not None:

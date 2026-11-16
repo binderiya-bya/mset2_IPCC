@@ -636,7 +636,7 @@ class scenario:
             shares = shares[shares['share'] != 0]
             
             # Read in renewable investment converters
-            inv_renew=pd.read_csv(os.getcwd() + '/GLORIA_template/Investment/Inv_renewables.csv', index_col = 0)
+            inv_renew=pd.read_csv(os.path.join(os.getcwd(), 'Data', 'MSET_data', 'Investment', 'Inv_renewables.csv'), index_col = 0)
             inv_renew.index.name = 'TRAD_COMM'
             # inv_renew = inv_renew.iloc[:,1:]
             inv_renew_long = pd.melt(inv_renew.reset_index(), id_vars=['TRAD_COMM'], 
@@ -979,7 +979,7 @@ class scenario:
             # ! value and let fuel use regrow with output
             
             # Read in renewable investment converters
-            io_power = pd.read_csv(os.getcwd() + '/GLORIA_template/Energy_emissions/power_generation_IO.csv', index_col = 0)
+            io_power = pd.read_csv(os.path.join(os.getcwd(), 'Data', 'MSET_data', 'Energy_emissions', 'power_generation_IO.csv'), index_col = 0)
             io_power.index.name = 'TRAD_COMM'
             # inv_renew = inv_renew.iloc[:,1:]
             io_power_long = pd.melt(io_power.reset_index(), id_vars=['TRAD_COMM'], 
