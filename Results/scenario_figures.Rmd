@@ -23,12 +23,13 @@ params:
   # scenario results folder, relative to Results/ ("." = current, or e.g. archive_scenario_cprice_disagg_YYYYMMDD_HHMM); the PDF is written there
   baseline_dir: "."   # change here! 
   # baseline results folder to compare against, relative to Results/
-  scenario: "IEA_CP"        # one scenario name, or "" for every scenario in results_dir
+  scenario: "IEA_CP"        # one scenario name, a list to compare (["IEA_CP", "IEA_CP2"], at most three), or "" for every scenario in results_dir (the first three)
 knit: (function(input, ...) {
     p <- rmarkdown::yaml_front_matter(input)$params;
     d <- file.path(dirname(input), p$results_dir);
-    s <- setdiff(sub("^results_file_long_(.+)_0[.]csv$", "\\1", list.files(d, "^results_file_long_.+_0[.]csv$")), "empty");
-    nm <- if (nzchar(p$scenario)) p$scenario else if (length(s) == 1) s else "all";
+    s <- setdiff(sub("_0[.]csv$", "", sub("^results_file_long_", "", list.files(d, "^results_file_long_.+_0[.]csv$"))), "empty");
+    a <- unlist(p$scenario); a <- a[nzchar(a)]; if (length(a) == 0) a <- s;
+    nm <- if (length(a) == 1) a else "all";
     rmarkdown::render(input, output_dir = d, output_file = paste0("scenario_figures_", nm, ".pdf"), envir = globalenv()) })
 ---
 
@@ -73,10 +74,19 @@ scen_of <- function(f) {   # scenario of a results file: numbered summary file o
   ifelse(s == b, NA_character_, s)
 }
 scenarios_in <- function(dir) unique(na.omit(scen_of(list.files(dir, "^results_file_long_.+_0\\.csv$"))))
+# Scenarios compared: params$scenario is "" (every scenario in results_dir), one name, or a list of names.
+# At most max_scenarios are plotted, so that the comparison figures and tables stay readable.
+max_scenarios <- 3
+scenarios_asked <- unlist(params$scenario)
+scenarios_asked <- scenarios_asked[nzchar(scenarios_asked)]
+if (length(scenarios_asked) == 0) scenarios_asked <- setdiff(scenarios_in(params$results_dir), baseline_name)
+scenarios_plotted <- head(scenarios_asked, max_scenarios)
+scenarios_dropped <- setdiff(scenarios_asked, scenarios_plotted)
+multi <- length(scenarios_plotted) > 1
 rfiles <- function(pattern) {   # baseline files from params$baseline_dir + scenario files from params$results_dir
   fb <- list.files(params$baseline_dir, pattern = pattern, full.names = TRUE)
   fb <- fb[scen_of(fb) %in% baseline_name]
-  wanted <- if (nzchar(params$scenario)) params$scenario else setdiff(scenarios_in(params$results_dir), baseline_name)
+  wanted <- scenarios_plotted
   fs <- list.files(params$results_dir, pattern = pattern, full.names = TRUE)
   fs <- fs[scen_of(fs) %in% wanted]
   c(fb, fs)
@@ -93,6 +103,72 @@ pivot_header <- function(k, tab, n_id = 1, id_labels = rep(" ", n_id)) {
     add_header_above(c(setNames(rep(1, n_id), id_labels), setNames(rep(1, length(lower)), lower))) %>%
     add_header_above(c(setNames(n_id, " "), setNames(up$lengths, up$values)))
 }
+# Scenario names are "name_" in the 2D/1D files and "name" in the energy files: one label, colour and line type each.
+scen_lab <- function(x) sub("_$", "", x)
+scen_colors <- setNames(c("#1B9E77", "#D95F02", "#7570B3")[seq_along(scenarios_plotted)], scen_lab(scenarios_plotted))
+scen_ltys   <- setNames(c("solid", "longdash", "dotted")[seq_along(scenarios_plotted)], scen_lab(scenarios_plotted))
+# Line figure of `value` (columns year, value, scenario and the region column named in `region`).
+#   One scenario : a line per region, as in baseline_figures.Rmd; with `panel`, one panel per level of that column
+#                  (facet_wrap with free scales, the baseline layout of the energy figures).
+#   2-3 scenarios: one panel per region and one line per scenario, so the scenarios are read against each other.
+# `lty_by` names a column shown as line type (otherwise the line type follows the scenario when several are compared).
+scen_plot <- function(d, region = "REG_imp", ylab, panel = NULL, lty_by = NULL, points = FALSE, title = NULL) {
+  d <- dplyr::ungroup(d)
+  d$.region <- d[[region]]
+  d$.scenario <- factor(scen_lab(d$scenario), levels = scen_lab(scenarios_plotted))
+  if (!is.null(lty_by)) d$.lty <- d[[lty_by]]
+  if (!is.null(panel)) d$.panel <- d[[panel]]
+  if (multi) {
+    g <- ggplot(d, aes(x = year, y = value, color = .scenario)) +
+      facet_wrap(~.region, scales = "free_y", ncol = 5) +
+      labs(y = ylab, color = 'scenario', title = title) +
+      scale_color_manual(values = scen_colors) +
+      scale_x_continuous(breaks = scales::breaks_pretty(3))
+    if (is.null(lty_by)) {
+      g <- g + aes(linetype = .scenario) + scale_linetype_manual(values = scen_ltys) + labs(linetype = 'scenario')
+    } else {
+      g <- g + aes(linetype = .lty) + labs(linetype = 'variable')
+    }
+  } else {
+    g <- ggplot(d, aes(x = year, y = value, color = .region)) +
+      labs(y = ylab, color = 'region', title = title) +
+      scale_color_manual(values = set_colors)
+    if (!is.null(lty_by)) {
+      g <- g + aes(linetype = .lty) + labs(linetype = 'variable')
+    }
+    if (is.null(panel)) {
+      g <- g + facet_wrap(~.scenario)
+    } else {
+      g <- g + facet_wrap(~.panel, scales = "free")
+    }
+  }
+  g <- g + geom_line() + theme_few() + scale_y_continuous(labels = scales::comma)
+  if (points) {
+    g <- g + geom_point()
+  }
+  if (multi) {
+    g <- g + theme(legend.position = "bottom")
+  }
+  g
+}
+# Figures with a second dimension (`panel`, e.g. fuel), for chunks with results='asis'.
+#   One scenario : one slide, a panel per level of `panel`.
+#   2-3 scenarios: one slide per level of `panel` (named in the figure title); `header` is the slide heading repeated
+#                  for the second and later slides.
+scen_slides <- function(d, region = "REG_imp", ylab, panel, header = NULL, points = FALSE) {
+  d <- dplyr::ungroup(d)
+  if (!multi) {
+    print(scen_plot(d, region = region, ylab = ylab, panel = panel, points = points))
+    return(invisible(NULL))
+  }
+  lv <- sort(unique(as.character(d[[panel]])))
+  for (i in seq_along(lv)) {
+    if (i > 1) cat("\n\n", header, "\n\n", sep = "")
+    print(scen_plot(d[as.character(d[[panel]]) == lv[i], ], region = region, ylab = ylab, points = points, title = lv[i]))
+    cat("\n\n")
+  }
+  invisible(NULL)
+}
 # Detailed split used by some figures: hard coal (incl. coke oven products) separate from lignite.
 fuel_detail_of <- setNames(case_when(
   str_detect(sector_names$Sector_names, regex("hard coal|coke oven", ignore_case = TRUE)) ~ "Hard coal",
@@ -102,6 +178,17 @@ fuel_detail_of <- setNames(case_when(
   str_detect(sector_names$Sector_names, regex("electric power", ignore_case = TRUE)) ~ "Electricity"),
   sector_names$Lfd_Nr)
 fuel_detail_of <- fuel_detail_of[!is.na(fuel_detail_of)]
+```
+
+```{r Scenarios compared,echo=FALSE,results='asis'}
+if (multi) {
+  cat("### Scenarios compared\n\n")
+  cat(paste0("- ", scen_lab(scenarios_plotted), collapse = "\n"), "\n\n")
+  cat("Figures: one panel per region and one line per scenario (% difference from the baseline); the energy figures have one slide per fuel. Tables: the scenarios side by side for each year.\n\n")
+  if (length(scenarios_dropped) > 0) {
+    cat("Not shown (at most ", max_scenarios, " scenarios are compared): ", paste(scenarios_dropped, collapse = ", "), "\n\n", sep = "")
+  }
+}
 ```
 
 # 2D variables
@@ -130,7 +217,7 @@ names(read_csv(files[1]))
 
 read_and_prefix <- function(filename) {
   res <- read_csv(filename, show_col_types = FALSE) %>%
-    mutate(scenario=str_extract(basename(filename), "(?<=results\\_file\\_long\\_)[A-Za-z_]{1,}"))
+    mutate(scenario=str_extract(basename(filename), "(?<=results\\_file\\_long\\_).+_(?=\\d+\\.\\w+$)"))   # "IEA_CP2_", "empty_" (keeps digits in the name)
   return(res)
 }
 
@@ -152,7 +239,7 @@ unique(combined_data$REG_imp)
 
 ```{r Print 1.1a figure,echo=FALSE,warning=FALSE,message=FALSE}
 df <- combined_data %>% 
-  filter(var_name == 'normal_output' & year > 2018) %>%
+  filter(var_name == 'output' & year > 2018) %>%
   # filter(REG_imp != 'EAS') %>%
   group_by(REG_imp, year, scenario) %>% 
   summarise(value = sum(value)) %>%
@@ -169,14 +256,8 @@ g <- df %>%
   filter(scenario != 'empty_') %>%
   mutate(value = value / base_value - 1) %>% 
   mutate(value = value * 100) %>%
-  ggplot(aes(x=year, y=value, color=REG_imp)) + 
-  geom_line()  + 
-  theme_few() + 
-  labs(y='economic output (% difference from baseline)', color='region') + 
-  scale_y_continuous(labels=scales::comma) + 
-  scale_color_manual(values=set_colors) + 
-  theme(text = element_text(family = "Roboto Condensed")) + 
-  facet_wrap(~scenario)
+  scen_plot(ylab = 'economic output (% difference from baseline)') +
+  theme(text = element_text(family = "Roboto Condensed"))
 
 g
 
@@ -235,13 +316,7 @@ g <- df %>%
   filter(scenario != 'empty_') %>%
   mutate(value = value / base_value - 1) %>%
   mutate(value = value * 100) %>% 
-  ggplot(aes(x=year, y=value, color=REG_imp)) + 
-  geom_line() + 
-  theme_few() + 
-  labs(y='employment (% difference from baseline)', color='region') + 
-  scale_y_continuous(labels=scales::comma) + 
-  scale_color_manual(values=set_colors) + 
-  facet_wrap(~scenario)
+  scen_plot(ylab = 'employment (% difference from baseline)')
 
 
 g
@@ -299,13 +374,7 @@ g <- df %>%
   filter(scenario != 'empty_') %>%
   mutate(value = labor_productivity / base_lp - 1) %>%
   mutate(value = value * 100) %>%
-  ggplot(aes(x=year, y=value, color=REG_imp)) +
-  geom_line() +
-  theme_few() +
-  labs(y='labour productivity (% difference from baseline)', color='region') +
-  scale_y_continuous(labels=scales::comma) +
-  scale_color_manual(values=set_colors) + 
-  facet_wrap(~scenario)
+  scen_plot(ylab = 'labour productivity (% difference from baseline)')
 
 g
 # ggplotly(g)
@@ -363,13 +432,7 @@ g <- df %>%
   filter(scenario != 'empty_') %>%
   mutate(value = value / base_value - 1) %>%
   mutate(value = value * 100) %>%
-  ggplot(aes(x=year, y=value, color=REG_imp)) +
-  geom_line() +
-  theme_few() +
-  labs(y='investment (% difference from baseline)', color='region') +
-  scale_y_continuous(labels=scales::comma) +
-  scale_color_manual(values=set_colors) + 
-  facet_wrap(~scenario)
+  scen_plot(ylab = 'investment (% difference from baseline)')
 
 g
 # ggplotly(g)
@@ -425,13 +488,7 @@ g <- df %>%
   filter(scenario != 'empty_') %>%
   mutate(value = value / base_value - 1) %>%
   mutate(value = value * 100) %>%
-  ggplot(aes(x=year, y=value, color=REG_imp)) +
-  geom_line() +
-  theme_few() +
-  labs(y='capital stock (% difference from baseline)', color='region') +
-  scale_y_continuous(labels=scales::comma) +
-  scale_color_manual(values=set_colors) + 
-  facet_wrap(~scenario)
+  scen_plot(ylab = 'capital stock (% difference from baseline)')
 
 g
 # ggplotly(g)
@@ -488,13 +545,7 @@ g <- df %>%
   filter(scenario != 'empty_') %>%
   mutate(value = capital_productivity / base_cp - 1) %>%
   mutate(value = value * 100) %>%
-  ggplot(aes(x=year, y=value, color=REG_imp)) +
-  geom_line() +
-  theme_few() +
-  labs(y='capital productivity (% difference from baseline)', color='region') +
-  scale_y_continuous(labels=scales::comma) +
-  scale_color_manual(values=set_colors) + 
-  facet_wrap(~scenario)
+  scen_plot(ylab = 'capital productivity (% difference from baseline)')
 
 g
 # ggplotly(g)
@@ -555,13 +606,7 @@ g <- df %>%
   filter(scenario != 'empty_') %>%
   mutate(value = price_index / base_index - 1) %>%
   mutate(value = value * 100) %>%
-  ggplot(aes(x=year, y=value, color=REG_imp)) +
-  geom_line() +
-  theme_few() +
-  labs(y='price level (% difference from baseline)', color='region') +
-  scale_y_continuous(labels=scales::comma) +
-  scale_color_manual(values=set_colors) + 
-  facet_wrap(~scenario)
+  scen_plot(ylab = 'price level (% difference from baseline)')
 
 g
 # ggplotly(g)
@@ -621,13 +666,7 @@ g <- df %>%
   filter(scenario != 'empty_') %>%
   mutate(value = wage / base_wage - 1) %>%
   mutate(value = value * 100) %>%
-  ggplot(aes(x=year, y=value, color=REG_imp)) +
-  geom_line() +
-  theme_few() +
-  labs(y='wages (% difference from baseline)', color='region') +
-  scale_y_continuous(labels=scales::comma) +
-  scale_color_manual(values=set_colors) + 
-  facet_wrap(~scenario)
+  scen_plot(ylab = 'wages (% difference from baseline)')
 
 g
 # ggplotly(g)
@@ -669,7 +708,7 @@ df1 %>%
 ### Producer prices - energy products, figure
 \framesubtitle{index, 2019 = 100}
 
-```{r Print 1.4c figure,echo=FALSE,warning=FALSE,message=FALSE}
+```{r Print 1.4c figure,echo=FALSE,warning=FALSE,message=FALSE,results='asis'}
 library(ggh4x)
 
 df <- combined_data %>%
@@ -685,21 +724,13 @@ df <- combined_data %>%
 
 base <- df %>% filter(scenario == 'empty_') %>% select(REG_imp, PROD_COMM, year, base_index = price_index)
 
-g <- df %>%
+df_plot <- df %>%
   left_join(base) %>%
   filter(scenario != 'empty_') %>%
   mutate(value = price_index / base_index - 1) %>%
-  mutate(value = value * 100) %>%
-  ggplot(aes(x=year, y=value, color=REG_imp)) +
-  geom_line() +
-  geom_point() +
-  theme_few() +
-  labs(y='price level (% difference from baseline)', color='region') +
-  scale_y_continuous(labels=scales::comma) +
-  scale_color_manual(values=set_colors) +
-  ggh4x::facet_grid2(rows=vars(PROD_COMM), cols=vars(scenario), scales = "free_y", independent = "y")
-
-g
+  mutate(value = value * 100)
+scen_slides(df_plot, ylab = 'price level (% difference from baseline)', panel = "PROD_COMM", points = TRUE,
+            header = "### Producer prices - energy products, figure\n\\framesubtitle{index, 2019 = 100}")
 ```
 
 
@@ -774,7 +805,7 @@ unique(combined_data$year)
 ### Energy production, figure - all regions
 \framesubtitle{EJ of energy produced}
 
-```{r Print 2.1a figure,echo=FALSE,warning=FALSE,message=FALSE}
+```{r Print 2.1a figure,echo=FALSE,warning=FALSE,message=FALSE,results='asis'}
 df <- combined_data %>%
   mutate(fuel = coalesce(unname(fuel_detail_of[as.character(TRAD_COMM)]), "Other")) %>%
   filter(var_name == 'fuel_use') %>%
@@ -784,27 +815,19 @@ df <- combined_data %>%
 
 base <- df %>% filter(scenario == 'empty') %>% select(-scenario) %>% rename(base_value = value)
 
-g <- df %>%
+df_plot <- df %>%
   left_join(base) %>%
   filter(scenario != 'empty') %>%
   mutate(value = value / base_value - 1) %>%
-  mutate(value = value * 100) %>%
-  ggplot(aes(x=year, y=value, color=REG_exp)) +
-  geom_line() +
-  ggh4x::facet_grid2(cols = vars(fuel), rows=vars(scenario), scales="free_y", independent='y') +
-  theme_few() +
-  labs(y='energy production (% difference from baseline)', color='region') +
-  scale_y_continuous(labels=scales::comma) +
-  scale_color_manual(values=set_colors)
-
-g
+  mutate(value = value * 100)
+scen_slides(df_plot, region = "REG_exp", ylab = 'energy production (% difference from baseline)', panel = "fuel",
+            header = "### Energy production, figure - all regions\n\\framesubtitle{EJ of energy produced}")
 ```
 
 
-### Energy production, figure - excl. EAS
-\framesubtitle{EJ of energy produced}
-
-```{r Print 2.1b figure,echo=FALSE,warning=FALSE,message=FALSE}
+```{r Print 2.1b figure,echo=FALSE,warning=FALSE,message=FALSE,results='asis',eval=!multi}
+# Only with one scenario: when several are compared, every region already has its own panel and y-axis.
+cat("### Energy production, figure - excl. EAS\n\\framesubtitle{EJ of energy produced}\n\n")
 df <- combined_data %>%
   filter(REG_exp != 'EAS') %>%
   mutate(fuel = coalesce(unname(fuel_detail_of[as.character(TRAD_COMM)]), "Other")) %>%
@@ -815,20 +838,12 @@ df <- combined_data %>%
 
 base <- df %>% filter(scenario == 'empty') %>% select(-scenario) %>% rename(base_value = value)
 
-g <- df %>%
+df_plot <- df %>%
   left_join(base) %>%
   filter(scenario != 'empty') %>%
   mutate(value = value / base_value - 1) %>%
-  mutate(value = value * 100) %>%
-  ggplot(aes(x=year, y=value, color=REG_exp)) +
-  geom_line() +
-  ggh4x::facet_grid2(cols = vars(fuel), rows=vars(scenario), scales="free_y", independent='y') +
-  theme_few() +
-  labs(y='energy production (% difference from baseline)', color='region') +
-  scale_y_continuous(labels=scales::comma) +
-  scale_color_manual(values=set_colors)
-
-g
+  mutate(value = value * 100)
+scen_slides(df_plot, region = "REG_exp", ylab = 'energy production (% difference from baseline)', panel = "fuel")
 ```
 
 
@@ -963,7 +978,7 @@ df1 %>%
 ### Energy demand, figure - all regions
 \framesubtitle{EJ of energy demand}
 
-```{r Print 2.2a figure,echo=FALSE,warning=FALSE,message=FALSE}
+```{r Print 2.2a figure,echo=FALSE,warning=FALSE,message=FALSE,results='asis'}
 df <- combined_data %>%
   mutate(fuel = coalesce(unname(fuel_detail_of[as.character(TRAD_COMM)]), "Other")) %>%
   filter(var_name == 'fuel_use') %>%
@@ -973,27 +988,19 @@ df <- combined_data %>%
 
 base <- df %>% filter(scenario == 'empty') %>% select(-scenario) %>% rename(base_value = value)
 
-g <- df %>%
+df_plot <- df %>%
   left_join(base) %>%
   filter(scenario != 'empty') %>%
   mutate(value = value / base_value - 1) %>%
-  mutate(value = value * 100) %>%
-  ggplot(aes(x=year, y=value, color=REG_imp)) +
-  geom_line() +
-  ggh4x::facet_grid2(cols = vars(fuel), rows=vars(scenario), scales="free_y", independent='y') +
-  theme_few() +
-  labs(y='energy demand (% difference from baseline)', color='region') +
-  scale_y_continuous(labels=scales::comma) +
-  scale_color_manual(values=set_colors)
-
-g
+  mutate(value = value * 100)
+scen_slides(df_plot, region = "REG_imp", ylab = 'energy demand (% difference from baseline)', panel = "fuel",
+            header = "### Energy demand, figure - all regions\n\\framesubtitle{EJ of energy demand}")
 ```
 
 
-### Energy demand, figure - excl. EAS
-\framesubtitle{EJ of energy demand}
-
-```{r Print 2.2b figure,echo=FALSE,warning=FALSE,message=FALSE}
+```{r Print 2.2b figure,echo=FALSE,warning=FALSE,message=FALSE,results='asis',eval=!multi}
+# Only with one scenario: when several are compared, every region already has its own panel and y-axis.
+cat("### Energy demand, figure - excl. EAS\n\\framesubtitle{EJ of energy demand}\n\n")
 df <- combined_data %>%
   filter(REG_imp != 'EAS') %>%
   mutate(fuel = coalesce(unname(fuel_detail_of[as.character(TRAD_COMM)]), "Other")) %>%
@@ -1004,20 +1011,12 @@ df <- combined_data %>%
 
 base <- df %>% filter(scenario == 'empty') %>% select(-scenario) %>% rename(base_value = value)
 
-g <- df %>%
+df_plot <- df %>%
   left_join(base) %>%
   filter(scenario != 'empty') %>%
   mutate(value = value / base_value - 1) %>%
-  mutate(value = value * 100) %>%
-  ggplot(aes(x=year, y=value, color=REG_imp)) +
-  geom_line() +
-  ggh4x::facet_grid2(cols = vars(fuel), rows=vars(scenario), scales="free_y", independent='y') +
-  theme_few() +
-  labs(y='energy demand (% difference from baseline)', color='region') +
-  scale_y_continuous(labels=scales::comma) +
-  scale_color_manual(values=set_colors)
-
-g
+  mutate(value = value * 100)
+scen_slides(df_plot, region = "REG_imp", ylab = 'energy demand (% difference from baseline)', panel = "fuel")
 ```
 
 
@@ -1192,13 +1191,7 @@ g <- df %>%
   filter(scenario != 'empty') %>%
   mutate(value = intensity / base_intensity - 1) %>%
   mutate(value = value * 100) %>%
-  ggplot(aes(x=year, y=value, color=REG_imp)) +
-  geom_line() +
-  theme_few() +
-  labs(y='energy intensity (% difference from baseline)', color='region') +
-  scale_y_continuous(labels=scales::comma) +
-  scale_color_manual(values=set_colors) + 
-  facet_wrap(~scenario)
+  scen_plot(ylab = 'energy intensity (% difference from baseline)')
 
 g
 ```
@@ -1230,13 +1223,7 @@ g <- df %>%
   filter(scenario != 'empty') %>%
   mutate(value = intensity / base_intensity - 1) %>%
   mutate(value = value * 100) %>%
-  ggplot(aes(x=year, y=value, color=REG_imp)) +
-  geom_line() +
-  theme_few() +
-  labs(y='fossil energy intensity (% difference from baseline)', color='region') +
-  scale_y_continuous(labels=scales::comma) +
-  scale_color_manual(values=set_colors) + 
-  facet_wrap(~scenario)
+  scen_plot(ylab = 'fossil energy intensity (% difference from baseline)')
 
 g
 ```
@@ -1250,7 +1237,7 @@ names(read_csv(files[1]))
 
 read_and_prefix <- function(filename) {
   res <- read_csv(filename, show_col_types = FALSE) %>%
-    mutate(scenario=str_extract(basename(filename), "(?<=results\\_file\\_long\\_)[A-Za-z_]{1,}"))
+    mutate(scenario=str_extract(basename(filename), "(?<=results\\_file\\_long\\_).+_(?=\\d+\\.\\w+$)"))   # "IEA_CP2_", "empty_" (keeps digits in the name)
   return(res)
 }
 
@@ -1282,13 +1269,7 @@ g <- df %>%
   filter(scenario != 'empty_') %>%
   # mutate(value = value / base_value - 1) %>%
   mutate(value = value * 100) %>%
-  ggplot(aes(x=year, y=value, color=REG_imp, linetype=var_name)) +
-  geom_line() +
-  theme_few() +
-  labs(y='unemployment rate (% difference from baseline)', color='region', linetype='variable') +
-  scale_y_continuous(labels=scales::comma) +
-  scale_color_manual(values=set_colors) + 
-  facet_wrap(~scenario)
+  scen_plot(ylab = 'unemployment rate (% difference from baseline)', lty_by = "var_name")
 
 g
 ```
