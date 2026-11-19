@@ -21,6 +21,9 @@ GLORIA_SECTOR_ROLES = {
     'non_market': [115, 116, 117, 118],
     'royalty': list(range(22, 41)),
     'electricity': [93],
+    # energy products whose output is NOT fitted to output_projection in calibration:
+    # hard coal, lignite, petroleum extraction, gas extraction, coke oven, refined petroleum, electricity, gas distribution
+    'calib_exclude': [24, 25, 26, 27, 62, 63, 93, 94],
 }
 
 def normalize_path(path):

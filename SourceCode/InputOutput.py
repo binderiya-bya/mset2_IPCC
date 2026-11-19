@@ -624,20 +624,33 @@ class IO:
         return self.dq_inv_induced, self.dq_inv_recyc, self.dq_inv_exog
     
     @timing_decorator
-    def calc_fd_vec(self, q_target, y0=None):
+    def calc_fd_vec(self, q_target, y0=None, free=None):
+        # free: optional boolean vector (same order as q_target). Cells flagged True are left
+        # out of the fit: no output target (row dropped) and no final-demand residual
+        # (column dropped, fd = 0), so their output responds freely to the other cells.
 
         if not (y0 is None):
-            scale = np.max(np.abs(q_target))
-            q_scaled = q_target / scale
+            if free is None:
+                keep = np.ones(len(q_target), dtype=bool)
+            else:
+                keep = ~np.asarray(free, dtype=bool)
+            L = self.L_BASE if keep.all() else self.L_BASE[np.ix_(keep, keep)]
+            q_keep = np.asarray(q_target, dtype=float)[keep]
+            y0_keep = np.asarray(y0, dtype=float)[keep]
 
-            y0_scaled = y0 / scale
+            scale = np.max(np.abs(q_keep))
+            if (not np.isfinite(scale)) or scale == 0:
+                return np.zeros(len(q_target))
+            q_scaled = q_keep / scale
+
+            y0_scaled = y0_keep / scale
             lower_bounds = [x*-0.6 if x > 0 else 0 for x in y0_scaled]
-            upper_bounds = np.zeros(self.L_BASE.shape[1])
+            upper_bounds = np.zeros(L.shape[1])
             upper_bounds[:] = np.inf
 
-            min_ = lsq_linear(self.L_BASE, q_scaled, bounds=(lower_bounds, upper_bounds), method='trf', verbose=1)
+            min_ = lsq_linear(L, q_scaled, bounds=(lower_bounds, upper_bounds), method='trf', verbose=1)
             x_ = min_.x
-            q_x = np.dot(self.L_BASE, x_)
+            q_x = np.dot(L, x_)
 
             # get a vector of issues
             diff_q = q_scaled - q_x
@@ -646,19 +659,13 @@ class IO:
 
             diff_q[diff == 0.0] = 0.0
 
-            min2_ = lsq_linear(self.L_BASE, diff_q, bounds=(lower_bounds, upper_bounds), method='trf', verbose=1)
+            min2_ = lsq_linear(L, diff_q, bounds=(lower_bounds, upper_bounds), method='trf', verbose=1)
 
             x_final = x_ + min2_.x
 
-            # if not min_.success:
-            #     print("######################################################################################")
-            #     print("!!!! ERROR: Optimization for calibration did not work.")
-            #     print("######################################################################################")
-            #     import pdb; pdb.set_trace()
-            #     warnings.warn(f"Optimization did not converge: {min_.message}", RuntimeWarning)
-
-            # calculate demand vector that leads to q_target
-            fd_vector = x_final * scale    
+            # calculate demand vector that leads to q_target (zero for the cells left out)
+            fd_vector = np.zeros(len(q_target))
+            fd_vector[keep] = x_final * scale
         else:
             fd_vector = np.linalg.solve(self.L_BASE, q_target)
 

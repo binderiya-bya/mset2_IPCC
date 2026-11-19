@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-11-19 — Energy products removed from calibration _[Prepared by Claude]_
+
+#### Changed
+
+* New sector role `calib_exclude` (`exog_vars.py`, GLORIA 24–27, 62, 63, 93, 94: hard coal, lignite, petroleum extraction, gas extraction, coke oven products, refined petroleum, electricity, gas distribution). These sectors are no longer fitted to `output_projection`.
+* Calibration loop (`model_class.py`): excluded cells (role `calib_exclude`, plus the cost-curve sectors when `cost_curves_run = True`) get no output target **and** no final-demand residual; their output follows the energy balance, cost curves and the intermediate demand of the calibrated sectors. Before, masked cost-curve sectors were targeted at "zero output change from the residual", which put offsetting residuals on fuels.
+* `InputOutput.calc_fd_vec` takes `free=` (boolean vector) and solves only on the remaining rows/columns.
+* Convergence metrics (`check_country`, output-weighted sector error, summary CSV) use the projected output of the calibrated cells only.
+
+#### To do after this change
+
+* Re-run calibration and baseline (`s_base.ini`, `CALIBRATING = True`, then `False`); existing `Residuals/residuals_{year}.pkl` still contain energy residuals.
+
+### 2026-11-19 — `IEA_CP.xlsx` scenario data _[Prepared by Claude]_
+
+Data only, no code change.
+
+#### Changed
+
+* `Inv_renew List`: Nuclear is mapped to `Nuclear` (was `Other`), so nuclear generation takes the `Nuclear` column of `power_generation_IO.csv` and nuclear investment the `Nuclear` column of `Inv_renewables.csv`. Bio stays `Other` (no such column in `power_generation_IO.csv`).
+* `Power investment`: all year values multiplied by 1,000 (million USD → thousand USD, the model unit).
+
+#### Added
+
+* `Carbon tax`: IEA GEC Model 2025 Current Policies CO2 prices on the electricity sector (15), all fuels, linear from 0 in 2019 to the full value in 2025 and flat to 2050. Country prices are weighted by the country's share of the region's 2019 power-sector CO2: NAM 3.17, EAS 13.80, EUR 66.41, AJN 1.39 USD/tCO2 (USD 2024, not deflated).
+
+#### Known issues
+
+* `Power investment` is still **added** to the model's own electricity investment (`dk_exog` on top of `dk_base`), it does not replace it.
+
 ### 2026-11-18 — Household EV channel: petrol → electricity _[Prepared by Claude]_
 
 Scenario-driven shift of household demand from refined petroleum to electricity as the EV stock share rises. **Draft, not yet run end-to-end.**

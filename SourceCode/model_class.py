@@ -352,6 +352,8 @@ class ModelRun:
         self.EXOG_VARS.set_multiyear()
 
         self.cost_curve_employment = self.EXOG_VARS.SECTOR_ROLES['cost_curve']
+        # sectors left out of calibration (energy products): no output target, no FD residual
+        self.calib_exclude = self.EXOG_VARS.SECTOR_ROLES.get('calib_exclude', [])
         self.refining_sectors = self.EXOG_VARS.SECTOR_ROLES['refining']
         
         self.MRIO_df_to_vec_DEF = lambda df,name: MRIO_df_to_vec(df, 'REG_imp','PROD_COMM',name, self.EXOG_VARS.R_list, self.EXOG_VARS.P_list)
@@ -976,21 +978,27 @@ class ModelRun:
                 projected_q = self.V.read_var("output", year-1) * projected_q
                 residual_q = projected_q - self.V.read_var("output", year-1) - dq_total 
 
-                # ! exclude cost curve sectors
+                # ! exclude energy products (role calib_exclude) and, with cost curves, the cost curve sectors.
+                # ! These cells are FREE: no output target and no FD residual (see calc_fd_vec),
+                # ! and they are left out of the convergence metrics.
                 residual_df = MRIO_vec_to_df_DEF(residual_q, 'residual_q')
+                _excl = set(self.calib_exclude)
                 if self.cost_curve_run:
-                    residual_df.loc[residual_df['PROD_COMM'].isin(self.cost_curve_employment), 'residual_q'] = 0.0
-                    # ! exclude 34 and 11 TEMPORARY TJK
-                    # residual_df.loc[residual_df['PROD_COMM'].isin([11,34]), 'residual_q'] = 0.0
+                    _excl |= set(self.cost_curve_employment)
+                residual_df['_free'] = residual_df['PROD_COMM'].isin(_excl).astype(float)
+                calib_free = np.asarray(MRIO_df_to_vec_DEF(residual_df, '_free'), dtype=float) > 0.5
+                residual_df = residual_df.drop(columns=['_free'])
+                residual_df.loc[residual_df['PROD_COMM'].isin(_excl), 'residual_q'] = 0.0
                 residual_q = MRIO_df_to_vec_DEF(residual_df, 'residual_q')
-                
-                residual_q = MRIO_df_to_vec_DEF(residual_df, 'residual_q')
+
+                # projected output of the calibrated cells only (denominator of the error metrics)
+                projected_q_calib = np.where(calib_free, 0.0, np.nan_to_num(projected_q))
 
                 # ! exclude small values
                 residual_q[np.abs(residual_q) < 10] = 0.0
 
                 check = np.nan_to_num(residual_q / projected_q, posinf=0, neginf=0, nan=0)
-                check_country = np.nan_to_num(residual_q).reshape(-1, len(EXOG_VARS.P_list)).sum(axis=1) / np.nan_to_num(projected_q).reshape(-1, len(EXOG_VARS.P_list)).sum(axis=1)
+                check_country = np.nan_to_num(residual_q).reshape(-1, len(EXOG_VARS.P_list)).sum(axis=1) / projected_q_calib.reshape(-1, len(EXOG_VARS.P_list)).sum(axis=1)
                 check_country = np.nan_to_num(check_country)
         
                 DYNAMIC['calibration_error'] = MRIO_vec_to_df_DEF(residual_q, "residual_q")
@@ -999,7 +1007,7 @@ class ModelRun:
         
                 print(MRIO_vec_to_df(check,'% diff',len(EXOG_VARS.P_list),EXOG_VARS.R).sort_values(by="% diff"))
                 # output-weighted mean |cell error|; the unweighted mean is dominated by tiny sectors
-                _proj_total = float(np.nansum(projected_q))
+                _proj_total = float(np.nansum(projected_q_calib))
                 sector_w_err = float(np.nansum(np.abs(residual_q)) / _proj_total) if _proj_total > 0 else 0.0
                 print("CALIBRATION                       Mean abs diff per sector: {}".format(np.mean(np.abs(check))))
                 print("CALIBRATION                       Output-weighted abs diff: {}".format(sector_w_err))
@@ -1053,7 +1061,7 @@ class ModelRun:
                         self._append_calibration_summary_row(
                             year=year,
                             best_residual_df=residual_df,
-                            best_projected_q=projected_q,
+                            best_projected_q=projected_q_calib,
                             best_check_country=check_country,
                             best_country_max=float(np.max(np.abs(check_country))),
                             best_sector_mean=sector_w_err,
@@ -1110,7 +1118,7 @@ class ModelRun:
                 # ? this decreases steps so more smooth calibration
                 self._log_calibration_iteration(year, calibration_counter, "step", check_country,
                                                 sector_w_err, 0.5, EXOG_VARS.R_list)
-                fd_vec = IO_model.calc_fd_vec(residual_q, IO_model.y0) * 0.5
+                fd_vec = IO_model.calc_fd_vec(residual_q, IO_model.y0, free=calib_free) * 0.5
                 
                 #%%
                 # TODO all should be in modules!
