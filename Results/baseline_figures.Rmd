@@ -14,11 +14,11 @@ header-includes:
   - \usepackage[T1]{fontenc}
   - \AtBeginSection{}
   - \AtBeginSubsection{}
-# Usage: set results_dir below (relative to Results/) and press Knit; baseline_figures_empty.pdf is written into that folder.
-# Console: rmarkdown::render("baseline_figures.Rmd", params = list(results_dir = "archive_baseline_empty_YYYYMMDD_HHMM"),
-#            output_dir = "archive_baseline_empty_YYYYMMDD_HHMM", output_file = "baseline_figures_empty.pdf")
+# Usage: set results_dir below (relative to Results/) and press Knit; baseline_figures_IEA_CP.pdf is written into that folder.
+# Console: rmarkdown::render("baseline_figures.Rmd", params = list(results_dir = "archive_baseline_IEA_CP_YYYYMMDD_HHMM"),
+#            output_dir = "archive_baseline_IEA_CP_YYYYMMDD_HHMM", output_file = "baseline_figures_IEA_CP.pdf")
 params:
-  results_dir: "."   # change here! Or "." for Results folder
+  results_dir: "archive_calibration_IEA_CP_20261118_2338"   # change here! Or "." for Results folder
 knit: (function(input, ...) {
     p <- rmarkdown::yaml_front_matter(input)$params;
     rmarkdown::render(input, output_dir = file.path(dirname(input), p$results_dir),
@@ -56,7 +56,7 @@ fuel_of <- setNames(fuel_lookup$fuel, fuel_lookup$code)
 primary_fuel_sectors <- fuel_lookup$code[fuel_lookup$primary]
 
 # Results to plot (folder relative to Results/; set in params at the top)
-baseline_name <- "empty"
+baseline_name <- "IEA_CP"
 scen_of <- function(f) {   # scenario of a results file: numbered summary file or per-year energy flows
   b <- basename(f)
   s <- ifelse(grepl("_energy_flows(_fd)?_\\d{4}\\.parquet$", b),
@@ -110,7 +110,7 @@ names(read_csv(files[1]))
 
 read_and_prefix <- function(filename) {
   res <- read_csv(filename, show_col_types = FALSE) %>%
-    mutate(scenario=str_extract(basename(filename), "(?<=results\\_file\\_long\\_)[a-z_]{1,}"))
+    mutate(scenario=str_extract(basename(filename), "(?<=results\\_file\\_long\\_)[A-Za-z_]{1,}"))
   return(res)
 }
 
@@ -133,7 +133,7 @@ unique(combined_data$REG_imp)
 
 ```{r Print 1.1a figure,echo=FALSE,warning=FALSE,message=FALSE}
 df <- combined_data %>% 
-  filter(var_name == 'output' & year > 2018 & scenario == 'empty_') %>%
+  filter(var_name == 'output' & year > 2018 & scenario == 'IEA_CP_') %>%
   group_by(REG_imp, year) %>% 
   summarise(value = sum(value)) %>%
   mutate(value = value / 10**6)
@@ -161,7 +161,7 @@ g
 
 ```{r Print 1.1a table,echo=FALSE,warning=FALSE,message=FALSE}
 df <- combined_data %>% 
-  filter(var_name == 'output' & year > 2018 & scenario == 'empty_') %>%
+  filter(var_name == 'output' & year > 2018 & scenario == 'IEA_CP_') %>%
   group_by(REG_imp, year) %>% 
   summarise(value = sum(value)) %>%
   mutate(value = value / 10**6)
@@ -195,7 +195,7 @@ df1 %>% left_join(df2) %>%
 
 ```{r Print 1.1b figure,echo=FALSE,warning=FALSE,message=FALSE}
 g <- combined_data %>% 
-  filter(var_name == 'output' & year > 2018 & scenario == 'empty_') %>%
+  filter(var_name == 'output' & year > 2018 & scenario == 'IEA_CP_') %>%
   filter(!(REG_imp) %in% c("EAS","EUR","NAM")) %>%
   group_by(REG_imp, year) %>% 
   summarise(value = sum(value)) %>%
@@ -219,7 +219,7 @@ g
 
 ```{r Print 1.2a figure,echo=FALSE,warning=FALSE,message=FALSE}
 g <- combined_data %>% 
-  filter(var_name %in% c('employment_base','dempl_total') & year > 2018 & scenario == 'empty_') %>%
+  filter(var_name %in% c('employment_base','dempl_total') & year > 2018 & scenario == 'IEA_CP_') %>%
   group_by(REG_imp, year) %>% 
   summarise(value = sum(value)) %>%
   mutate(value = value / 10**6) %>%
@@ -240,7 +240,7 @@ g
 
 ```{r Print 1.2a table,echo=FALSE,warning=FALSE,message=FALSE}
 df <- combined_data %>% 
-  filter(var_name %in% c('employment_base','dempl_total') & year > 2018 & scenario == 'empty_') %>%
+  filter(var_name %in% c('employment_base','dempl_total') & year > 2018 & scenario == 'IEA_CP_') %>%
   group_by(REG_imp, year) %>% 
   summarise(value = sum(value)) %>%
   mutate(value = value / 10**6)
@@ -275,7 +275,7 @@ df1 %>% left_join(df2) %>%
 ```{r Print 1.2b figure,echo=FALSE,warning=FALSE,message=FALSE}
 
 g <- combined_data %>% 
-  filter(var_name %in% c('employment_base','dempl_total','output') & year > 2018 & scenario == 'empty_') %>%
+  filter(var_name %in% c('employment_base','dempl_total','output') & year > 2018 & scenario == 'IEA_CP_') %>%
   group_by(REG_imp, year, var_name) %>% 
   summarise(value = sum(value)) %>%
   pivot_wider(id_cols=c('REG_imp','year'), names_from='var_name', values_from='value') %>%
@@ -295,9 +295,10 @@ g
 ### Labour productivity growth, table
 \framesubtitle{thousand USD (constant 2019 price) economic output per person employed}
 
+
 ```{r Print 1.2b table,echo=FALSE,warning=FALSE,message=FALSE}
 df <- combined_data %>% 
-  filter(var_name %in% c('employment_base','dempl_total','output') & year > 2018 & scenario == 'empty_') %>%
+  filter(var_name %in% c('employment_base','dempl_total','output') & year > 2018 & scenario == 'IEA_CP_') %>%
   group_by(REG_imp, year, var_name) %>% 
   summarise(value = sum(value)) %>%
   pivot_wider(id_cols=c('REG_imp','year'), names_from='var_name', values_from='value') %>%
@@ -329,7 +330,7 @@ df1 %>% left_join(df2) %>%
 
 ```{r Print 1.3a figure,echo=FALSE,warning=FALSE,message=FALSE}
 g <- combined_data %>% 
-  filter(var_name == 'dk_base' & year > 2018 & scenario == 'empty_') %>%
+  filter(var_name == 'dk_base' & year > 2018 & scenario == 'IEA_CP_') %>%
   group_by(REG_imp, year) %>% 
   summarise(value = sum(value)) %>%
   mutate(value = value / 10**6) %>%
@@ -350,7 +351,7 @@ g
 
 ```{r Print 1.3a table,echo=FALSE,warning=FALSE,message=FALSE}
 df <- combined_data %>% 
-  filter(var_name == 'dk_base' & year > 2018 & scenario == 'empty_') %>%
+  filter(var_name == 'dk_base' & year > 2018 & scenario == 'IEA_CP_') %>%
   group_by(REG_imp, year) %>% 
   summarise(value = sum(value)) %>%
   mutate(value = value / 10**6)
@@ -384,7 +385,7 @@ df1 %>% left_join(df2) %>%
 
 ```{r Print 1.3b figure,echo=FALSE,warning=FALSE,message=FALSE}
 g <- combined_data %>% 
-  filter(var_name == 'k' & year > 2018 & scenario == 'empty_') %>%
+  filter(var_name == 'k' & year > 2018 & scenario == 'IEA_CP_') %>%
   group_by(REG_imp, year) %>% 
   summarise(value = sum(value)) %>%
   mutate(value = value / 10**6) %>%
@@ -405,7 +406,7 @@ g
 
 ```{r Print 1.3b table,echo=FALSE,warning=FALSE,message=FALSE}
 df <- combined_data %>% 
-  filter(var_name == 'k' & year > 2018 & scenario == 'empty_') %>%
+  filter(var_name == 'k' & year > 2018 & scenario == 'IEA_CP_') %>%
   group_by(REG_imp, year) %>% 
   summarise(value = sum(value)) %>%
   mutate(value = value / 10**6)
@@ -440,7 +441,7 @@ df1 %>% left_join(df2) %>%
 ```{r Print 1.3c figure,echo=FALSE,warning=FALSE,message=FALSE}
 
 g <- combined_data %>% 
-  filter(var_name %in% c('k','output') & year > 2018 & scenario == 'empty_') %>%
+  filter(var_name %in% c('k','output') & year > 2018 & scenario == 'IEA_CP_') %>%
   group_by(REG_imp, year, var_name) %>% 
   summarise(value = sum(value)) %>%
   pivot_wider(id_cols=c('REG_imp','year'), names_from='var_name', values_from='value') %>%
@@ -462,7 +463,7 @@ g
 
 ```{r Print 1.3c table,echo=FALSE,warning=FALSE,message=FALSE}
 df <- combined_data %>% 
-  filter(var_name %in% c('k','output') & year > 2018 & scenario == 'empty_') %>%
+  filter(var_name %in% c('k','output') & year > 2018 & scenario == 'IEA_CP_') %>%
   group_by(REG_imp, year, var_name) %>% 
   summarise(value = sum(value)) %>%
   pivot_wider(id_cols=c('REG_imp','year'), names_from='var_name', values_from='value') %>%
@@ -495,7 +496,7 @@ df1 %>% left_join(df2) %>%
 ```{r Print 1.4a figure,echo=FALSE,warning=FALSE,message=FALSE}
 
 g <- combined_data %>% 
-  filter(var_name %in% c('dp_all','output') & year > 2018 & scenario == 'empty_') %>%
+  filter(var_name %in% c('dp_all','output') & year > 2018 & scenario == 'IEA_CP_') %>%
   pivot_wider(id_cols=c('REG_imp','PROD_COMM','year'), names_from='var_name', values_from='value') %>%
   group_by(REG_imp, year) %>% 
   mutate(dp_all = dp_all * output / sum(output)) %>%
@@ -520,7 +521,7 @@ g
 
 ```{r Print 1.4a table,echo=FALSE,warning=FALSE,message=FALSE}
 df <- combined_data %>% 
-  filter(var_name %in% c('dp_all','output') & year > 2018 & scenario == 'empty_') %>%
+  filter(var_name %in% c('dp_all','output') & year > 2018 & scenario == 'IEA_CP_') %>%
   pivot_wider(id_cols=c('REG_imp','PROD_COMM','year'), names_from='var_name', values_from='value') %>%
   group_by(REG_imp, year) %>% 
   mutate(dp_all = dp_all * output / sum(output)) %>%
@@ -557,7 +558,7 @@ df1 %>% left_join(df2) %>%
 ```{r Print 1.4b figure,echo=FALSE,warning=FALSE,message=FALSE}
 
 g <- combined_data %>% 
-  filter(var_name %in% c('wage','employment_base') & year > 2018 & scenario == 'empty_') %>%
+  filter(var_name %in% c('wage','employment_base') & year > 2018 & scenario == 'IEA_CP_') %>%
   pivot_wider(id_cols=c('REG_imp','PROD_COMM','year'), names_from='var_name', values_from='value') %>%
   group_by(REG_imp, year) %>% 
   mutate(wage = wage * employment_base / sum(employment_base)) %>%
@@ -579,7 +580,7 @@ g
 
 ```{r Print 1.4b table,echo=FALSE,warning=FALSE,message=FALSE}
 df <- combined_data %>% 
-  filter(var_name %in% c('wage','employment_base') & year > 2018 & scenario == 'empty_') %>%
+  filter(var_name %in% c('wage','employment_base') & year > 2018 & scenario == 'IEA_CP_') %>%
   pivot_wider(id_cols=c('REG_imp','PROD_COMM','year'), names_from='var_name', values_from='value') %>%
   group_by(REG_imp, year) %>% 
   mutate(wage = wage * employment_base / sum(employment_base)) %>%
@@ -611,7 +612,7 @@ df1 %>% left_join(df2) %>%
 ```{r Print 1.4c figure,echo=FALSE,warning=FALSE,message=FALSE}
 
 g <- combined_data %>%
-  filter(var_name %in% c('dp_all') & year > 2018 & scenario == 'empty_') %>%
+  filter(var_name %in% c('dp_all') & year > 2018 & scenario == 'IEA_CP_') %>%
   mutate(fuel = unname(fuel_of[as.character(PROD_COMM)])) %>%
   filter(!is.na(fuel)) %>%
   filter(PROD_COMM %in% primary_fuel_sectors) %>%
@@ -640,7 +641,7 @@ g
 ```{r Print 1.4c table,echo=FALSE,warning=FALSE,message=FALSE}
 
 df <- combined_data %>%
-  filter(var_name %in% c('dp_all') & year > 2018 & scenario == 'empty_') %>%
+  filter(var_name %in% c('dp_all') & year > 2018 & scenario == 'IEA_CP_') %>%
   mutate(fuel = unname(fuel_of[as.character(PROD_COMM)])) %>%
   filter(!is.na(fuel)) %>%
   filter(PROD_COMM %in% primary_fuel_sectors) %>%
@@ -711,7 +712,6 @@ unique(combined_data$year)
 df <- combined_data %>% 
   mutate(fuel = coalesce(unname(fuel_of[as.character(TRAD_COMM)]), "Other")) %>%
   filter(var_name == 'fuel_use') %>%
-  filter(scenario %in% c("empty")) %>%
   group_by(scenario, year,REG_imp,fuel) %>% 
   summarise(value = sum(value)) %>% ungroup() %>% 
   mutate(value = value / 10**6)
@@ -722,7 +722,7 @@ g <- df %>%
   facet_wrap(~ fuel, scales="free") + 
   theme_few() + 
   labs(y='EJ of energy produced', color='region') + 
-  scale_y_continuous(labels=scales::comma) + 
+  scale_y_continuous(labels=scales::comma)+ 
   scale_color_manual(values=set_colors)
 
 g
@@ -737,7 +737,7 @@ df <- combined_data %>%
   filter(REG_imp != 'EAS') %>%
   mutate(fuel = coalesce(unname(fuel_of[as.character(TRAD_COMM)]), "Other")) %>%
   filter(var_name == 'fuel_use') %>%
-  filter(scenario %in% c("empty")) %>%
+  filter(scenario %in% c("IEA_CP")) %>%
   group_by(scenario, year,REG_imp,fuel) %>% 
   summarise(value = sum(value)) %>% ungroup() %>% 
   mutate(value = value / 10**6)
@@ -762,7 +762,7 @@ g
 df <- combined_data %>% 
   mutate(fuel = unname(fuel_of[as.character(TRAD_COMM)])) %>%
   filter(var_name == 'fuel_use' & fuel == 'Coal') %>%
-  filter(year > 2018 & scenario == 'empty') %>%
+  filter(year > 2018 & scenario == 'IEA_CP') %>%
   group_by(REG_imp, year,fuel) %>% 
   summarise(value = sum(value)) %>%
   mutate(value = value / 10**6) # EJ
@@ -798,7 +798,7 @@ df1 %>% left_join(df2) %>%
 df <- combined_data %>% 
   mutate(fuel = unname(fuel_of[as.character(TRAD_COMM)])) %>%
   filter(var_name == 'fuel_use' & fuel == 'Petrol') %>%
-  filter(year > 2018 & scenario == 'empty') %>%
+  filter(year > 2018 & scenario == 'IEA_CP') %>%
   group_by(REG_imp, year,fuel) %>% 
   summarise(value = sum(value)) %>%
   mutate(value = value / 10**6) # EJ
@@ -835,7 +835,7 @@ df1 %>% left_join(df2) %>%
 df <- combined_data %>% 
   mutate(fuel = unname(fuel_of[as.character(TRAD_COMM)])) %>%
   filter(var_name == 'fuel_use' & fuel == 'Gas') %>%
-  filter(year > 2018 & scenario == 'empty') %>%
+  filter(year > 2018 & scenario == 'IEA_CP') %>%
   group_by(REG_imp, year,fuel) %>% 
   summarise(value = sum(value)) %>%
   mutate(value = value / 10**6) # EJ
@@ -872,7 +872,7 @@ df1 %>% left_join(df2) %>%
 df <- combined_data %>% 
   mutate(fuel = unname(fuel_of[as.character(TRAD_COMM)])) %>%
   filter(var_name == 'fuel_use' & fuel == 'Electricity') %>%
-  filter(year > 2018 & scenario == 'empty') %>%
+  filter(year > 2018 & scenario == 'IEA_CP') %>%
   group_by(REG_imp, year,fuel) %>% 
   summarise(value = sum(value)) %>%
   mutate(value = value / 10**6) # EJ
@@ -910,7 +910,7 @@ df1 %>% left_join(df2) %>%
 df <- combined_data %>% 
   mutate(fuel = coalesce(unname(fuel_of[as.character(TRAD_COMM)]), "Other")) %>%
   filter(var_name == 'fuel_use') %>%
-  filter(scenario %in% c("empty")) %>%
+  filter(scenario %in% c("IEA_CP")) %>%
   group_by(scenario, year,REG_exp,fuel) %>% 
   summarise(value = sum(value)) %>% ungroup() %>% 
   mutate(value = value / 10**6)
@@ -936,7 +936,7 @@ df <- combined_data %>%
   filter(REG_exp != 'EAS') %>%
   mutate(fuel = coalesce(unname(fuel_of[as.character(TRAD_COMM)]), "Other")) %>%
   filter(var_name == 'fuel_use') %>%
-  filter(scenario %in% c("empty")) %>%
+  filter(scenario %in% c("IEA_CP")) %>%
   group_by(scenario, year,REG_exp,fuel) %>% 
   summarise(value = sum(value)) %>% ungroup() %>% 
   mutate(value = value / 10**6)
@@ -961,7 +961,7 @@ g
 df <- combined_data %>% 
   mutate(fuel = unname(fuel_of[as.character(TRAD_COMM)])) %>%
   filter(var_name == 'fuel_use' & fuel == 'Coal') %>%
-  filter(year > 2018 & scenario == 'empty') %>%
+  filter(year > 2018 & scenario == 'IEA_CP') %>%
   group_by(REG_exp, year,fuel) %>% 
   summarise(value = sum(value)) %>%
   mutate(value = value / 10**6) # EJ
@@ -997,7 +997,7 @@ df1 %>% left_join(df2) %>%
 df <- combined_data %>% 
   mutate(fuel = unname(fuel_of[as.character(TRAD_COMM)])) %>%
   filter(var_name == 'fuel_use' & fuel == 'Petrol') %>%
-  filter(year > 2018 & scenario == 'empty') %>%
+  filter(year > 2018 & scenario == 'IEA_CP') %>%
   group_by(REG_exp, year,fuel) %>% 
   summarise(value = sum(value)) %>%
   mutate(value = value / 10**6) # EJ
@@ -1034,7 +1034,7 @@ df1 %>% left_join(df2) %>%
 df <- combined_data %>% 
   mutate(fuel = unname(fuel_of[as.character(TRAD_COMM)])) %>%
   filter(var_name == 'fuel_use' & fuel == 'Gas') %>%
-  filter(year > 2018 & scenario == 'empty') %>%
+  filter(year > 2018 & scenario == 'IEA_CP') %>%
   group_by(REG_exp, year,fuel) %>% 
   summarise(value = sum(value)) %>%
   mutate(value = value / 10**6) # EJ
@@ -1071,7 +1071,7 @@ df1 %>% left_join(df2) %>%
 df <- combined_data %>% 
   mutate(fuel = unname(fuel_of[as.character(TRAD_COMM)])) %>%
   filter(var_name == 'fuel_use' & fuel == 'Electricity') %>%
-  filter(year > 2018 & scenario == 'empty') %>%
+  filter(year > 2018 & scenario == 'IEA_CP') %>%
   group_by(REG_exp, year,fuel) %>% 
   summarise(value = sum(value)) %>%
   mutate(value = value / 10**6) # EJ
@@ -1126,13 +1126,13 @@ combined_data2 <- gather(combined_data2, "var_name", "value", -REG_imp,-PROD_COM
 ```{r Print 2.3a figure,echo=FALSE,warning=FALSE,message=FALSE}
 df <- combined_data %>% 
   filter(var_name == 'fuel_use') %>%
-  filter(scenario %in% c("empty")) %>%
+  filter(scenario %in% c("IEA_CP")) %>%
   group_by(scenario, year,REG_imp) %>% 
   summarise(value = sum(value)) %>% ungroup() %>% 
   rename(energy = value)
 
 df2 <- combined_data2 %>% 
-  filter(var_name == 'output' & year > 2018 & scenario == 'empty') %>% 
+  filter(var_name == 'output' & year > 2018 & scenario == 'IEA_CP') %>% 
   group_by(REG_imp, year) %>% 
   summarise(value = sum(value) / 10**3) %>% ungroup() %>% rename(output = value)
 
@@ -1157,13 +1157,13 @@ df <- combined_data %>%
   mutate(fuel = unname(fuel_of[as.character(TRAD_COMM)])) %>%
   filter(fuel %in% c("Coal","Petrol","Gas")) %>%
   filter(var_name == 'fuel_use') %>%
-  filter(scenario %in% c("empty")) %>%
+  filter(scenario %in% c("IEA_CP")) %>%
   group_by(scenario, year,REG_imp) %>% 
   summarise(value = sum(value)) %>% ungroup() %>% 
   rename(energy = value)
 
 df2 <- combined_data2 %>% 
-  filter(var_name == 'output' & year > 2018 & scenario == 'empty') %>% 
+  filter(var_name == 'output' & year > 2018 & scenario == 'IEA_CP') %>% 
   group_by(REG_imp, year) %>% 
   summarise(value = sum(value) / 10**3) %>% ungroup() %>% rename(output = value)
 
@@ -1210,7 +1210,7 @@ unique(combined_data$REG_imp)
 
 ```{r Print 3.1a figure,echo=FALSE,warning=FALSE,message=FALSE}
 df <- combined_data %>% 
-  filter(year > 2018 & scenario == 'empty_' & var_name %in% c('unemployment_rate','shadow_unemployment_rate')) %>% 
+  filter(year > 2018 & scenario == 'IEA_CP_' & var_name %in% c('unemployment_rate','shadow_unemployment_rate')) %>% 
   select(-scenario) %>%
   mutate(value = value)
 
@@ -1231,7 +1231,7 @@ g
 
 ```{r Print 3.1b table,echo=FALSE,warning=FALSE,message=FALSE}
 df <- combined_data %>% 
-  filter(year > 2018 & scenario == 'empty_' & var_name %in% c('unemployment_rate','shadow_unemployment_rate')) %>% 
+  filter(year > 2018 & scenario == 'IEA_CP_' & var_name %in% c('unemployment_rate','shadow_unemployment_rate')) %>% 
   select(-scenario) %>%
   mutate(value = value) %>% 
   # mutate(value = round(value, digits=0)) %>%

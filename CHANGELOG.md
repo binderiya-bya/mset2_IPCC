@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-11-18 — Household EV channel: petrol → electricity _[Prepared by Claude]_
+
+Scenario-driven shift of household demand from refined petroleum to electricity as the EV stock share rises. **Draft, not yet run end-to-end.**
+
+#### Added
+
+* Scenario sheet `EV stock shares` (EV share of the car fleet, 0–1, by region and year) is read by `Scenario.set_ev_share()`. A missing sheet switches the channel off.
+* `hh_fuel_substitution` first moves car km from refined petroleum to electricity according to the *change* in EV share (same km demand; EV uses 1/3 of the energy), then applies the existing price/income substitution. Volumes use the fixed base-year implicit prices.
+
+#### Changed
+
+* The net money effect of the household fuel substitution now enters `real_spend`, so a fuel saving flows through `endog_save` → windfall saving / partial re-spend like other spending changes. **This also changes results of runs without an EV sheet slightly (carrier prices per TJ differ); recalibrate and re-run the baseline.**
+
+#### Known issues
+
+* `road_share` (0.9) and `ev_efficiency` (3.0) are code defaults, not settings.
+* EV purchase costs (transport equipment demand) and lost fuel-tax revenue are not modelled.
+* The `FD code*` column of the sheet is a row counter and is ignored.
+
 ### 2026-11-02 — mset2_IPCC: 10 IPCC regions × 23 sectors _[Prepared by Claude]_
 
 Merged the 2026-11-01 mset2 working-tree changes onto the HU_CI fork (`4087203`) and fixed what blocked the 23-sector baseline.

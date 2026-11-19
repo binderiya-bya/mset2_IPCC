@@ -431,7 +431,7 @@ class ener_balance:
             'io_impact': energy_flows_substitution[['REG_imp','REG_exp','PROD_COMM','TRAD_COMM','fuel_use_change_relative']].copy()
         }
     
-    def hh_fuel_substitution(self, energy_flows, hh_cons, hh_price, delta_inc_rel):
+    def hh_fuel_substitution(self, energy_flows, hh_cons, hh_price, delta_inc_rel, road_share=0.9, ev_efficiency=3.0):
         # ? hh substitution across energy carriers
         # ! NOTE: we only do substitution here, because own price elasticity
         # ! is in the HH module, so overall value of energy (constant price)
@@ -439,6 +439,13 @@ class ener_balance:
         # hh_cons is REG_imp | REG_exp | TRAD_COMM | VIPA
         # hh_price is REG_imp | TRAD_COMM | delta_p_avg | VIPA_prod
         # delta_inc_rel is REG_imp | delta_inc_rel (real household income growth rate)
+        # self.common['ev_share'] is REG_imp | ev_share | ev_share_prev (EV stock share, 0-1; empty = EV channel off)
+        # self.common['price_index'] (last year) turns nominal petrol spend into volume for the EV shift
+        # ? EV channel: the rise in EV stock share moves car km from refined petroleum to
+        # ? electricity BEFORE the price/income substitution below. Same km demand; an EV uses
+        # ? 1/ev_efficiency of the energy of an ICE car, so total TJ falls (the normalisation
+        # ? below therefore targets the post-EV total, not the original one). road_share is the
+        # ? share of household petroleum use that is car fuel.
 
         # calc tech shares in HH consumption
         hh = hh_cons.reset_index()
@@ -453,6 +460,28 @@ class ener_balance:
         hh_ = hh.copy()
 
         hh = hh.groupby(['REG_imp','TRAD_COMM']).agg({'physical_value':'sum','VIPA':'sum'}).reset_index()
+        hh['physical_value_orig'] = hh['physical_value']
+        hh['d_ev'] = 0.0
+        ev_share = self.common.get('ev_share')
+        price_index = self.common.get('price_index')
+        if ev_share is not None and len(ev_share) > 0 and price_index is not None:
+            petrol = self.PRODUCTS[self.PRODUCTS['Sector_names'].str.contains('Refined petroleum')]['Lfd_Nr'].to_list()
+            ely = self.PRODUCTS[self.PRODUCTS['Sector_names'].str.contains('Electric power')]['Lfd_Nr'].to_list()
+            assert len(petrol) == 1 and len(ely) == 1, f"EV channel needs exactly one petrol and one electricity sector, found {petrol}, {ely}"
+            petrol, ely = petrol[0], ely[0]
+            # petrol volume: nominal TJ-equivalent deflated by the petrol price level
+            pi = price_index[price_index['PROD_COMM'] == petrol][['REG_imp','price_index']]
+            ev = hh[hh['TRAD_COMM'] == petrol][['REG_imp','physical_value']].merge(pi, how='left', on='REG_imp').merge(ev_share, how='inner', on='REG_imp')
+            ev['price_index'] = ev['price_index'].fillna(1.0).replace(0, 1.0)
+            d_share = (ev['ev_share'] - ev['ev_share_prev']).clip(lower=0.0) # no EV -> ICE reversal
+            frac_switch = (d_share / (1.0 - ev['ev_share_prev']).clip(lower=0.05)).clip(upper=1.0)
+            ev['d_petrol'] = -road_share * (ev['physical_value'] / ev['price_index']) * frac_switch
+            ev['d_ely'] = -ev['d_petrol'] / ev_efficiency
+            d_ev = pd.concat([ev[['REG_imp','d_petrol']].rename(columns={'d_petrol':'d_ev'}).assign(TRAD_COMM=petrol),
+                              ev[['REG_imp','d_ely']].rename(columns={'d_ely':'d_ev'}).assign(TRAD_COMM=ely)])
+            hh = hh.drop(columns=['d_ev']).merge(d_ev, how='left', on=['REG_imp','TRAD_COMM'])
+            hh['d_ev'] = hh['d_ev'].fillna(0.0)
+            hh['physical_value'] = hh['physical_value'] + hh['d_ev']
         hh['share'] = hh['physical_value'] / hh.groupby(['REG_imp'])['physical_value'].transform('sum')
         # ? is share is small exclude (to avoid pushing the price)
         sel_ = hh['share'] < 0.01
@@ -527,7 +556,9 @@ class ener_balance:
 
         hh['physical_value_adjust'] = hh.groupby(['REG_imp'])['physical_value'].transform('sum') / hh.groupby(['REG_imp'])['physical_value_new'].transform('sum')
         hh['physical_value_new_adj'] = hh['physical_value_new'] * hh['physical_value_adjust']
-        hh['physical_value_imp'] = hh['physical_value_new_adj'] - hh['physical_value']
+        # ? target total is the post-EV total (physical_value already includes d_ev), so the
+        # ? EV efficiency gain survives the normalisation
+        hh['physical_value_imp'] = hh['physical_value_new_adj'] - hh['physical_value_orig']
 
         # allocate across export partners
         hh_['exp_share'] = hh_['physical_value'] / hh_.groupby(['REG_imp','TRAD_COMM'])['physical_value'].transform('sum')

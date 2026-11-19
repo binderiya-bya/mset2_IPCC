@@ -450,7 +450,8 @@ def initiate_modules(self, DYNAMIC, EXOG_VARS, MRIO_df_to_vec_DEF, MRIO_vec_to_d
         'carbon_content': DYNAMIC['carbon_content'],
         'carbon_content_process': DYNAMIC['carbon_content_process'],
         'fuel_price': DYNAMIC['fuel_price'],
-        'ctax_price_impact': ctax_price_impact
+        'ctax_price_impact': ctax_price_impact,
+        'ev_share': Scenario.ev_share # REG_imp | ev_share | ev_share_prev (household EV channel)
     })
 
     # calculate energy_flows based on the IO table and implicit prices stored from the first year
@@ -972,16 +973,19 @@ def initiate_modules(self, DYNAMIC, EXOG_VARS, MRIO_df_to_vec_DEF, MRIO_vec_to_d
     # add growth effect (income) is year > year[0]
     # ! Use DYNAMIC['inc_exog'][year] (which includes remittance injection) rather than
     # ! Scenario.inc_exog (which is the raw scenario data without remittances)
-    HH_price_eff, HH_inc_eff, HH_save_eff, HH_delta_inc_rel, HH_real_income_diag, HH_real_spend_diag = HH_model.calc_hh_demand_change(HH_price, recyc_rev_base, self.V.read_var('inc_exog', year, as_df=True).rename(columns={'inc_exog':'dlabor_exog'}),self.V.read_var('inc_exog', year-1, as_df=True).rename(columns={'inc_exog':'dlabor_exog'}), year=year)
-    self.V.write_var('real_income_hh', year, HH_real_income_diag, from_df=True)
-    self.V.write_var('real_spend_hh', year, HH_real_spend_diag, from_df=True)
-
     # household fuel substitution gated the same way as the intermediate channel above
     if year > self.model_start and year >= self.fuel_substitution_start:
         HH_tech_substitution = Energy_emissions.hh_fuel_substitution(ener_base, self.V.read_var('household_consumption', year-1, as_df=True).rename(columns={'household_consumption':'VIPA'}).set_index(['REG_imp','REG_exp','TRAD_COMM']), DYNAMIC['HH_price'][year-1], DYNAMIC['HH_delta_inc_rel'][year-1])
     else:
         HH_tech_substitution = pd.DataFrame(columns=['REG_imp','REG_exp','TRAD_COMM','VIPA_imp'])
-    
+
+    # net money effect of the whole household substitution (EV shift + price/income) enters
+    # real_spend / endog_save in the household module via dy_tech
+
+    HH_price_eff, HH_inc_eff, HH_save_eff, HH_delta_inc_rel, HH_real_income_diag, HH_real_spend_diag = HH_model.calc_hh_demand_change(HH_price, recyc_rev_base, self.V.read_var('inc_exog', year, as_df=True).rename(columns={'inc_exog':'dlabor_exog'}),self.V.read_var('inc_exog', year-1, as_df=True).rename(columns={'inc_exog':'dlabor_exog'}), dy_tech=HH_tech_substitution, year=year)
+    self.V.write_var('real_income_hh', year, HH_real_income_diag, from_df=True)
+    self.V.write_var('real_spend_hh', year, HH_real_spend_diag, from_df=True)
+
     dy_hh_price = IO_model.build_dy_hh(HH_price_eff, 'delta_y_price')
     dy_hh_inc = IO_model.build_dy_hh(HH_inc_eff, 'delta_y_inc')
     dy_hh_save = IO_model.build_dy_hh(HH_save_eff, 'delta_y_save')
@@ -1742,7 +1746,7 @@ def initiate_modules(self, DYNAMIC, EXOG_VARS, MRIO_df_to_vec_DEF, MRIO_vec_to_d
         DYNAMIC['HH_price'][year] = HH_price
         # ! Use DYNAMIC['inc_exog'][year] (includes remittance injection) not Scenario.inc_exog
         HH_price_eff, HH_inc_eff, HH_save_eff, HH_delta_inc_rel, HH_real_income_diag, HH_real_spend_diag = HH_model.calc_hh_demand_change(HH_price, recyc_rev_base, self.V.read_var('inc_exog', year, as_df=True).rename(columns={'inc_exog':'dlabor_exog'}),
-                                                                               self.V.read_var('inc_exog', year-1, as_df=True).rename(columns={'inc_exog':'dlabor_exog'}), dlabor_inc_nat=dlabor_nat, cpi_d_wage=Inc_model.cpi_d, year=year)
+                                                                               self.V.read_var('inc_exog', year-1, as_df=True).rename(columns={'inc_exog':'dlabor_exog'}), dlabor_inc_nat=dlabor_nat, cpi_d_wage=Inc_model.cpi_d, dy_tech=HH_tech_substitution, year=year)
         DYNAMIC['HH_delta_inc_rel'][year] = HH_delta_inc_rel
         self.V.write_var('real_income_hh', year, HH_real_income_diag, from_df=True)
         self.V.write_var('real_spend_hh', year, HH_real_spend_diag, from_df=True)

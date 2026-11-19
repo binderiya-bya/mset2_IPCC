@@ -126,7 +126,8 @@ class household:
 
         return HH_price, HH_ctax
         
-    def calc_hh_demand_change(self, HH_price_, recyc_rev, inc_exog, inc_exog_prev, dlabor_inc_nat=None, cpi_d_wage=None, year=None):
+    def calc_hh_demand_change(self, HH_price_, recyc_rev, inc_exog, inc_exog_prev, dlabor_inc_nat=None, cpi_d_wage=None, dy_tech=None, year=None):
+        # dy_tech: REG_imp | REG_exp | TRAD_COMM | VIPA_imp, net money effect of household fuel substitution (counted in real_spend)
         #? inc_exog is: REG_imp | dlabor_exog
 
         HH_price = HH_price_.copy()
@@ -228,7 +229,16 @@ class household:
         dcalc['real_income'] = (dcalc["delta_inc"] + dcalc["dlabor_cpi"] + dcalc["compensation"]) / (dcalc['cpi'] * (1 + dcalc['quasi_CPI']))
         dcalc = dcalc.groupby(['REG_imp']).agg({'real_income':'sum'}).reset_index()
         dcalc = dcalc.merge(dHH.groupby(['REG_imp']).agg({'VIPA':'sum','delta_y_price':'sum','delta_y_inc':'sum','dy_exog':'sum'}).reset_index(), how='left', on=['REG_imp'])
-        dcalc['real_spend'] = dcalc['VIPA'] + dcalc['delta_y_price'] + dcalc['delta_y_inc'] + dcalc['dy_exog']
+        # ? household fuel substitution (incl. EV petrol->electricity): TJ-neutral substitution is not
+        # ? money-neutral, and the EV shift cuts total TJ (~3x efficiency), so net spend changes and flows into endog_save
+        # ? -> windfall_save -> partial re-spend (lambda_save) like every other spend change
+        if dy_tech is not None and len(dy_tech) > 0:
+            tech_net = dy_tech.groupby('REG_imp')['VIPA_imp'].sum().rename('dy_tech').reset_index()
+            dcalc = dcalc.merge(tech_net, how='left', on='REG_imp')
+            dcalc['dy_tech'] = dcalc['dy_tech'].fillna(0.0)
+        else:
+            dcalc['dy_tech'] = 0.0
+        dcalc['real_spend'] = dcalc['VIPA'] + dcalc['delta_y_price'] + dcalc['delta_y_inc'] + dcalc['dy_exog'] + dcalc['dy_tech']
         dcalc['endog_save'] = 1 - dcalc['real_spend']/dcalc['real_income']
 
         # ! persisted so the trailing save-rate benchmark (save_rate1/2/3) can be built

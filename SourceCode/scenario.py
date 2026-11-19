@@ -91,6 +91,7 @@ class scenario:
 
         self.set_fd_exog()
         self.set_hh_permanent()
+        self.set_ev_share()
 
     def set_carbon_tax(self):
         # first we read in the scenario file, the columns are set in the template
@@ -455,9 +456,48 @@ class scenario:
         return True
 
     # ^ //////////////////////////////////////
-    
+
     # ^ ------------------------------------
-    # ^   Sheet: Investment BY sector       
+    # ^   Sheet: EV stock shares
+    # ^ ------------------------------------
+
+    def set_ev_share(self):
+        # ? EV stock share (0-1) of the household car fleet by region. Passes on this year's AND
+        # ? last year's share, because the household module needs the *change* in share (the
+        # ? 2019 level is whatever it is; only movements away from it shift demand).
+        # ! the 'FD code*' column in the sheet is a row counter (FD_1..FD_10), not an FD
+        # ! category, and the sector column is always electricity; both are ignored - the
+        # ! channel always moves household demand from refined petroleum to electricity
+        year_prev = max(self.YEAR - 1, self.YEARS[0]) if len(self.YEARS) > 0 else self.YEAR
+        columns_ = ['REG_imp','ev_share_prev','ev_share']
+
+        try:
+            ev = pd.read_excel(self.scenario_file, sheet_name='EV stock shares', skiprows=13)
+            ev = ev[['Country ISO*', year_prev, self.YEAR]]
+            ev.columns = columns_
+        except (ValueError, KeyError):
+            ev = pd.DataFrame(columns=columns_)
+
+        ev = ev.dropna(subset=['REG_imp']).copy()
+        ev[['ev_share_prev','ev_share']] = ev[['ev_share_prev','ev_share']].fillna(0.0).clip(0.0, 1.0)
+
+        # add index before resolving
+        ev['Line'] = np.arange(len(ev)).tolist()
+
+        ev = resolve_comma(ev, "REG_imp")
+        ev = resolve_all(ev, "REG_imp", self.REGIONS['Region_acronyms'].to_list())
+
+        # ? REG_imp | ev_share | ev_share_prev; regions absent from the sheet get no shift
+        ev = ev.drop(columns=['Line']).groupby(['REG_imp']).agg({'ev_share':'max','ev_share_prev':'max'}).reset_index()
+
+        self.ev_share = ev
+
+        return True
+
+    # ^ //////////////////////////////////////
+
+    # ^ ------------------------------------
+    # ^   Sheet: Investment BY sector
     # ^ ------------------------------------
 
     def set_exog_inv(self, investment_base):

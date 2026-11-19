@@ -277,3 +277,36 @@ Prefix matching would be wrong here: `cprice_disagg` is a prefix of `cprice_disa
 - Fuel sectors (`fuel_of`, `fuel_detail_of`, `primary_fuel_sectors`) are built from sector names in sheet `P` of `Variable_list_MINDSET.xlsx`.
 
 ---
+
+## 2026-11-18 — Household EV channel (petrol → electricity)
+
+### Summary
+
+The `EV stock shares` sheet of a scenario workbook drives a shift of household final demand from refined petroleum (sector "Refined petroleum products") to electricity, in physical (TJ) terms, and the resulting net money effect is passed into the household saving routine. Draft; compiles, scenario reader tested on `IEA_CP.xlsx`, model not run.
+
+### Files changed
+
+- `SourceCode/scenario.py`
+- `SourceCode/ener_balance.py`
+- `SourceCode/initiate_modules.py`
+- `SourceCode/household.py`
+
+### Logic
+
+- `Scenario.set_ev_share()` (called in `__init__`, structure as `set_hh_permanent`): reads sheet `EV stock shares` (`skiprows=13`, columns `Country ISO*`, previous year, current year), `resolve_comma` / `resolve_all` on `REG_imp`; result `REG_imp | ev_share | ev_share_prev`, clipped to 0–1. Previous year is `max(YEAR-1, YEARS[0])`, so the first year has zero change. Missing sheet → empty frame → channel off. The `Sector code*` and `FD code*` columns are ignored (`FD code*` is a row counter FD_1..FD_10).
+- `Energy_emissions.load_dynamic` receives `'ev_share': Scenario.ev_share`; `hh_fuel_substitution` reads it and `price_index` (year-1) from `self.common`.
+- In `hh_fuel_substitution`, after household TJ is aggregated by `REG_imp` × `TRAD_COMM`:
+  - `frac_switch = clip(ΔS⁺ / max(1 − S_prev, 0.05), ≤ 1)`, `ΔS⁺` = increase in share (no EV → ICE reversal).
+  - `d_petrol = −road_share × (petrol TJ / price_index_petrol) × frac_switch`; `d_ely = −d_petrol / ev_efficiency` (defaults `road_share = 0.9`, `ev_efficiency = 3.0`). Sectors are found by name ("Refined petroleum", "Electric power"); an assertion requires exactly one match each.
+  - `physical_value` is shifted by `d_ev` before shares, relative prices and the income/price response are computed. The existing normalisation (total TJ held constant) now targets the **post-EV** total; otherwise it would cancel the efficiency gain. `physical_value_imp` is measured against the original (pre-EV) TJ, so `VIPA_imp` contains EV shift plus substitution. Conversion to money uses the existing base-year implicit prices (kUSD/TJ), so only the electricity/petrol price ratio matters for the EV part.
+- `initiate_modules.py`: `hh_fuel_substitution` is now called **before** `calc_hh_demand_change` (it only uses year-1 `HH_price` / `HH_delta_inc_rel`); its output is passed as `dy_tech` to both `calc_hh_demand_change` calls (first pass and within-year loop) and still feeds `dq_hh_tech_substitution` as before. Gating by `fuel_substitution_start` applies to the EV channel too.
+- `household.py`: `calc_hh_demand_change(..., dy_tech=None)`; `real_spend = VIPA + delta_y_price + delta_y_inc + dy_exog + dy_tech` (`dy_tech` = regional sum of `VIPA_imp`). A lower net spend raises `endog_save`, which feeds `windfall_save` and the `lambda_save` re-spend.
+
+### Notes and risks
+
+- Including the full `VIPA_imp` (not only the EV part) in `real_spend` changes results of every run with `fuel_substitution` active, also without an EV sheet, because TJ-neutral substitution is not money-neutral. `real_spend_hh` also feeds the trailing `save_rate1/2/3` benchmark, so recalibrate and re-run the baseline before comparing.
+- Pre-existing inconsistency, unchanged: the household TJ in `hh_fuel_substitution` is nominal spend / base implicit price (not deflated by the price index); the EV step deflates petrol by the petrol price index.
+- Calibration may partly absorb the EV shift if `output_projection` already embeds electrification; the baseline `empty.xlsx` has no EV sheet, so the channel only acts in scenario runs.
+- Not modelled: EV purchase cost (sector 14 demand), fuel-tax revenue loss, EV vs ICE mileage differences.
+
+---
