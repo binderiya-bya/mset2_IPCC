@@ -18,7 +18,7 @@ header-includes:
 # Console: rmarkdown::render("baseline_figures.Rmd", params = list(results_dir = "archive_baseline_IEA_CP_YYYYMMDD_HHMM"),
 #            output_dir = "archive_baseline_IEA_CP_YYYYMMDD_HHMM", output_file = "baseline_figures_IEA_CP.pdf")
 params:
-  results_dir: "archive_calibration_IEA_CP_20261118_2338"   # change here! Or "." for Results folder
+  results_dir: "archive_calibration_IEA_CP_20261119_2337"   # change here! Or "." for Results folder
 knit: (function(input, ...) {
     p <- rmarkdown::yaml_front_matter(input)$params;
     rmarkdown::render(input, output_dir = file.path(dirname(input), p$results_dir),
@@ -1179,6 +1179,51 @@ g <- df %>% left_join(df2) %>%
 g
 ```
 
+## 2.4 Household energy consumption
+```{r Load data - household fuels,include=FALSE}
+# physical: household (FD_1) fuel use by flow, TJ (energy_flows_fd files)
+fd_files <- rfiles("results_file_long.*energy_flows_fd_[0-9]{4}.parquet")
+hh_phys <- fd_files %>%
+  map(function(f) read_parquet(f) %>%
+        mutate(year = as.numeric(str_extract(basename(f), "[0-9]{4}")))) %>%
+  list_rbind() %>%
+  filter(FD == "FD_1", year > 2018) %>%
+  mutate(fuel = unname(fuel_of[as.character(TRAD_COMM)])) %>%
+  filter(fuel %in% c("Petrol", "Electricity")) %>%
+  group_by(year, REG_imp, fuel) %>%
+  summarise(value = sum(fuel_use) / 10**6, .groups = "drop") %>%   # TJ -> EJ
+  mutate(unit = "Physical (EJ)")
+
+# monetary: household final consumption by product, kUSD (summary file _1.parquet)
+hh_files <- rfiles("results_file_long.*_1\\.parquet")
+hh_mon <- hh_files %>%
+  map(function(f) read_parquet(f, col_select = c("REG_imp", "TRAD_COMM", "year", "household_consumption"))) %>%
+  list_rbind() %>%
+  filter(year > 2018) %>%
+  mutate(fuel = unname(fuel_of[as.character(TRAD_COMM)])) %>%
+  filter(fuel %in% c("Petrol", "Electricity")) %>%
+  group_by(year, REG_imp, fuel) %>%
+  summarise(value = sum(household_consumption) / 10**6, .groups = "drop") %>%   # kUSD -> bn USD
+  mutate(unit = "Monetary (bn USD)")
+```
+
+### Household electricity and petrol consumption, figure
+\framesubtitle{physical (EJ) and monetary (bn USD) household consumption by region}
+
+```{r Print 2.4a figure,echo=FALSE,warning=FALSE,message=FALSE}
+g <- bind_rows(hh_phys, hh_mon) %>%
+  mutate(unit = factor(unit, levels = c("Physical (EJ)", "Monetary (bn USD)"))) %>%
+  ggplot(aes(x=year, y=value, color=REG_imp)) +
+  geom_line() +
+  facet_grid(unit ~ fuel, scales="free_y") +
+  theme_few() +
+  labs(y='household consumption', color='region') +
+  scale_y_continuous(labels=scales::comma) +
+  scale_color_manual(values=set_colors)
+
+g
+```
+
 # 1D variables
 
 ```{r, include=FALSE}
@@ -1188,7 +1233,7 @@ names(read_csv(files[1]))
 
 read_and_prefix <- function(filename) {
   res <- read_csv(filename, show_col_types = FALSE) %>%
-    mutate(scenario=str_extract(basename(filename), "(?<=results\\_file\\_long\\_)[a-z_]{1,}"))
+    mutate(scenario=str_extract(basename(filename), "(?<=results\\_file\\_long\\_)[A-Za-z_]{1,}"))
   return(res)
 }
 

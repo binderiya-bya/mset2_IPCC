@@ -149,6 +149,24 @@ class ener_balance:
         # kUSD / TJ
         mrio['implicit_price'] = mrio['z_bp'] / mrio['physical_value']
 
+        # ! guard against monetary/physical mismatches in the input data (e.g. AJN lignite -> power:
+        # ! 18 kUSD vs 442,551 TJ gives 4e-5 kUSD/TJ, so any growth of the monetary flow explodes fuel use).
+        # ! only the too-LOW side is guarded (that is what inflates physical use): flows priced below
+        # ! median / PRICE_OUTLIER_RATIO get the median price of that user sector x fuel (PROD_COMM, TRAD_COMM)
+        PRICE_OUTLIER_RATIO = 100.0
+        valid = mrio['implicit_price'].replace([np.inf, -np.inf], np.nan)
+        valid = valid.where(valid > 0)
+        ref_price = valid.groupby([mrio['PROD_COMM'], mrio['TRAD_COMM']]).transform('median')
+        outlier = (valid < ref_price / PRICE_OUTLIER_RATIO) & ref_price.notna()
+        if outlier.any():
+            print(f"calc_fuel_implicit_price: {int(outlier.sum())} flows with implicit price below "
+                  f"median/{PRICE_OUTLIER_RATIO:g} replaced by the (PROD_COMM, TRAD_COMM) median; largest by physical value:")
+            print(mrio.loc[outlier].assign(ref_price=ref_price[outlier])
+                  .sort_values('physical_value', ascending=False)
+                  [['REG_imp','REG_exp','PROD_COMM','TRAD_COMM','physical_value','implicit_price','ref_price']]
+                  .head(15).to_string(index=False))
+        mrio.loc[outlier, 'implicit_price'] = ref_price[outlier]
+
         # ? the issue here that we found 3/3/2026 is that if the implicit price differs between countries
         # ? and then the trade module drivers trade substitution we might get a situation where physical uses increases
         # ? or decreases substantially just because we're switching to a country (exporter) with a lower/higher implicit price
