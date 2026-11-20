@@ -449,7 +449,7 @@ class ener_balance:
             'io_impact': energy_flows_substitution[['REG_imp','REG_exp','PROD_COMM','TRAD_COMM','fuel_use_change_relative']].copy()
         }
     
-    def hh_fuel_substitution(self, energy_flows, hh_cons, hh_price, delta_inc_rel, road_share=0.9, ev_efficiency=3.0):
+    def hh_fuel_substitution(self, energy_flows, hh_cons, hh_price, delta_inc_rel, road_share=0.9, ev_efficiency=1.5):
         # ? hh substitution across energy carriers
         # ! NOTE: we only do substitution here, because own price elasticity
         # ! is in the HH module, so overall value of energy (constant price)
