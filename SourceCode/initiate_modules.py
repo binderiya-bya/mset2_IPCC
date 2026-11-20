@@ -261,6 +261,14 @@ def initiate_modules(self, DYNAMIC, EXOG_VARS, MRIO_df_to_vec_DEF, MRIO_vec_to_d
     govt_spending = Scenario.build_govt_spending()
     inv_spending = Scenario.build_inv_spending()
 
+    # power-sector coefficient residual (observed - power-share implied), fixed in the first model year
+    Scenario.power_resid = None
+    if year > self.model_start:
+        try:
+            Scenario.power_resid = self.V.read_var_df('power_io_resid', self.model_start)
+        except (FileNotFoundError, OSError):
+            print(f"WARNING power_io_resid for {self.model_start} not found - power coefficients use the shares without residual")
+
     io_changes = Scenario.set_io_changes()
     Scenario.set_cost_shock()
 
@@ -1055,6 +1063,15 @@ def initiate_modules(self, DYNAMIC, EXOG_VARS, MRIO_df_to_vec_DEF, MRIO_vec_to_d
     })
     Trade_model.calculate_dynamics()
     ind_trade = Trade_model.calc_IO_coef(ind_ener_glo, price_change_pre_trade, year)
+
+    # first model year: residual = observed power-sector input structure (ind_trade) minus the one
+    # implied by the power shares; stored once, added to the share-implied coefficients afterwards
+    if year == self.model_start:
+        power_resid = Scenario.compute_power_residual(ind_trade)
+        if power_resid is not None:
+            self.V.write_var_df('power_io_resid', year, power_resid)
+            Scenario.power_resid = power_resid
+            io_changes = Scenario.rebuild_io_changes()
 
     # calculate FD substitution
     fd_trade_response = Trade_model.calc_FD_substitution(price_change_pre_trade)

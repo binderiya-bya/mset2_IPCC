@@ -132,6 +132,24 @@ class IO:
         # for now ignore type, replace values always
         # keep other values intact
 
+        # 'replace_new' = replace, but the flow is created if it is not in the sparse matrix yet
+        # (power-sector inputs without an existing supply structure, allocated to REG_exp = REG_imp)
+        new_flows = io_change_data[(io_change_data['Type'] == 'replace_new') & (io_change_data['Value'] > 0)]
+        if len(new_flows) > 0:
+            key_cols = ['REG_imp','PROD_COMM','REG_exp','TRAD_COMM']
+            existing_keys = sparse_matrix.reset_index()[key_cols].astype({'REG_imp': str, 'REG_exp': str, 'PROD_COMM': 'int16', 'TRAD_COMM': 'int16'})
+            missing = new_flows[key_cols].astype({'REG_imp': str, 'REG_exp': str, 'PROD_COMM': 'int16', 'TRAD_COMM': 'int16'})\
+                .drop_duplicates().merge(existing_keys.drop_duplicates(), how='left', on=key_cols, indicator=True)
+            missing = missing[missing['_merge'] == 'left_only'].drop(columns='_merge')
+            if len(missing) > 0:
+                missing['IO_coef_trade'] = 0.0
+                sparse_matrix = sparse_matrix.reset_index()
+                for c in key_cols:  # categorical keys cannot take unseen values
+                    if isinstance(sparse_matrix[c].dtype, pd.CategoricalDtype):
+                        sparse_matrix[c] = sparse_matrix[c].astype(missing[c].dtype)
+                sparse_matrix = pd.concat([sparse_matrix, missing[key_cols + ['IO_coef_trade']]], ignore_index=True)
+        io_change_data = io_change_data.assign(Type=io_change_data['Type'].replace({'replace_new': 'replace'}))
+
         # ? consolidate io_change_data
         # ! min_count=1 preserves NaN for all-NaN groups (years with no shock specified);
         # ! plain 'sum' silently turns those into 0.0, which then overwrites baseline coefficients

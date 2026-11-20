@@ -4,6 +4,23 @@ This file records detailed technical notes on significant refactors and migratio
 
 ---
 
+## 2026-11-19 — Power-sector coefficient residuals
+
+### Summary
+
+Power-share-driven IO replacements used global recipe values, discarding country-specific input structure. A residual fixed in the first model year now keeps it.
+
+### Details
+
+- `scenario.py`: `set_power_io_changes` split into `_power_totals` (sheet x recipe, summed over exporters, cached per instance), `compute_power_residual(ind_trade)`, and the spread step. `set_io_changes` keeps the non-power rows in `_io_changes_nonpower`; `rebuild_io_changes()` re-assembles `io_changes` once the residual exists (first year).
+- `initiate_modules.py`: first year, right after `Trade_model.calc_IO_coef`, computes and writes `power_io_resid` and rebuilds `io_changes`; later years read it from `model_start` and set `Scenario.power_resid` before `set_io_changes()`.
+- `InputOutput.io_change`: `replace_new` rows are appended to the sparse matrix when the cell does not exist, then treated as `replace`.
+- `variables.xlsx`: `power_io_resid` (REG_imp, PROD_COMM, TRAD_COMM), MIN/MAX +-Inf.
+- Residual is additive with a floor of 0 on the sum; the existing 0.03-0.97 column-sum guard in `io_change` still applies.
+- Test: IEA_CP 2019-2021 ran cleanly; max change of any power-sector input coefficient 2019->2020 was about 0.011.
+
+---
+
 ## 2026-03-31 — Type 1 DYNAMIC variable migration to `self.V`
 
 ### Summary
