@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-11-20 — Household residential channel: heating fuels ↔ electricity _[Prepared by Claude]_
+
+Scenario-driven shift of household energy use between heating fuels and electricity. Households only (no services). **Draft: compiles, reader and shift tested on `IEA_CP.xlsx` and the 20 Nov results; model not run.**
+
+#### Added
+
+* Scenario sheet `Buildings electricity shares` (electricity share of buildings energy, 0–1, by region and year) is read by `Scenario.set_resid_ely_share()`. A missing sheet switches the channel off.
+* `Energy_emissions.resid_heat_shift()`, called in `hh_fuel_substitution` after the EV step and before the price/income substitution. The pool is household coal, lignite, gas, coke, refined petroleum not used by cars, and electricity net of EV electricity. Heating fuels are replaced pro rata by electricity (`heat_efficiency` = 3: a heat pump uses 1/3 of the energy of a boiler, so 1 TJ of fuel is replaced by 1/3 TJ of electricity and total household energy falls).
+* Default (`resid_level = False`): the sheet's change is applied to the model's own share, `(1 − target) = (1 − model share) × (1 − sheet_t) / (1 − sheet_t−1)`. `resid_level = True` sets the share to the sheet value.
+
+#### Changed
+
+* `set_ev_share()` also passes the first-year EV share (`ev_share_base`), used to separate car fuel and EV electricity from the residential pool.
+
+#### Known issues
+
+* The sheet level does not match the model's household energy in 2019 (the model has no household biomass among its energy carriers): with `resid_level = True` household electricity falls 77% in AFR, 54% in LAC and 44% in EEA in the first year.
+* `heat_efficiency` and `resid_level` are code defaults, not settings.
+* Recalibrate before use.
+
 ### 2026-11-19 — Energy products removed from calibration _[Prepared by Claude]_
 
 #### Changed

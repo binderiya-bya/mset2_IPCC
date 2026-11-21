@@ -310,3 +310,23 @@ The `EV stock shares` sheet of a scenario workbook drives a shift of household f
 - Not modelled: EV purchase cost (sector 14 demand), fuel-tax revenue loss, EV vs ICE mileage differences.
 
 ---
+
+
+## 2026-11-20 — Household residential channel (heating fuels ↔ electricity)
+
+### Files changed
+
+- `SourceCode/scenario.py`: `set_resid_ely_share()` (called in `__init__`); `set_ev_share()` adds `ev_share_base`.
+- `SourceCode/ener_balance.py`: static method `resid_heat_shift()`; call in `hh_fuel_substitution` (new arguments `heat_efficiency = 3.0`, `resid_level = False`).
+- `SourceCode/initiate_modules.py`: `'resid_ely_share': Scenario.resid_ely_share` in the energy module's `common`.
+
+### Logic
+
+- Reader: sheet `Buildings electricity shares`; the header row is located by its `Country ISO*` cell (last occurrence, the sheet has a second header further up); result `REG_imp | resid_ely_share | resid_ely_share_prev`, previous year `max(YEAR-1, YEARS[0])`, so the first year has zero change.
+- Volumes: household TJ by carrier divided by last year's price index (as in the EV step).
+- Car fuel left per unit of first-year petrol: `road_share × (1 − S_t) / (1 − S_0)` (S = EV stock share); its share of today's petrol is `road_part`. EV electricity = petrol × `road_part` × `(S_t − S_0) / (1 − S_t)` / `ev_efficiency`. Both are outside the pool.
+- With E = pool electricity, F = pool fuels, target t: `x = (t (E + F) − E) / (1/η + t (1 − 1/η))`, limited to `[−E η, F]`; fuels change by `−x` pro rata, electricity by `x / η`. The change is added to `physical_value`, so the existing normalisation and the money effect (`VIPA_imp` → `real_spend`) carry it.
+
+### Check (function level)
+
+- First year: zero change. Residential step alone (`heat_efficiency = 3`), cumulated 2020–2050 on 2019 household energy: electricity EAS 6.2 → 7.4 EJ, EUR 4.4 → 5.3, NAM 6.0 → 6.9, SAS 1.6 → 2.0; gas EAS 2.8 → 0.6, EUR 4.9 → 2.9, NAM 5.6 → 3.7; world household energy (model carriers) 107.5 → 98.5 EJ; no negative values.

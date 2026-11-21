@@ -449,7 +449,49 @@ class ener_balance:
             'io_impact': energy_flows_substitution[['REG_imp','REG_exp','PROD_COMM','TRAD_COMM','fuel_use_change_relative']].copy()
         }
     
-    def hh_fuel_substitution(self, energy_flows, hh_cons, hh_price, delta_inc_rel, road_share=0.9, ev_efficiency=1.5):
+    @staticmethod
+    def resid_heat_shift(hh, resid_share, ev_share, price_index, petrol, ely, road_share=0.9, ev_efficiency=1.5, heat_efficiency=3.0, resid_level=False):
+        # ? swaps household heating fuels against electricity; returns REG_imp | TRAD_COMM | d_res (TJ)
+        # ? pool excludes car fuel and EV electricity; 1 TJ fuel <-> 1/heat_efficiency TJ electricity
+        # ? default: sheet's change applied to the model's share; resid_level=True: sheet level
+        df = hh.copy()
+        if price_index is not None:
+            pi = price_index[['REG_imp','PROD_COMM','price_index']].rename(columns={'PROD_COMM':'TRAD_COMM'})
+            df = df.merge(pi, how='left', on=['REG_imp','TRAD_COMM'])
+            df['price_index'] = df['price_index'].fillna(1.0).replace(0, 1.0)
+        else:
+            df['price_index'] = 1.0
+        df['vol'] = df['physical_value'] / df['price_index']
+        if ev_share is not None and len(ev_share) > 0:
+            df = df.merge(ev_share[['REG_imp','ev_share','ev_share_base']], how='left', on='REG_imp')
+        else:
+            df['ev_share'] = 0.0; df['ev_share_base'] = 0.0
+        s = df['ev_share'].fillna(0.0).clip(upper=0.95); s0 = np.minimum(df['ev_share_base'].fillna(0.0), s)
+        road_left = road_share * (1.0 - s) / (1.0 - s0)
+        road_part = road_left / ((1.0 - road_share) + road_left)  # car-fuel share of petrol
+        df['pool'] = df['vol']
+        is_p = df['TRAD_COMM'] == petrol; is_e = df['TRAD_COMM'] == ely
+        df.loc[is_p, 'pool'] = (df['vol'] * (1.0 - road_part))[is_p]
+        ev_ely = (df['vol'] * road_part * (s - s0) / (1.0 - s) / ev_efficiency)[is_p].groupby(df['REG_imp']).sum()
+        df.loc[is_e, 'pool'] = (df['vol'] - df['REG_imp'].map(ev_ely).fillna(0.0)).clip(lower=0.0)[is_e]
+        df = df.merge(resid_share[['REG_imp','resid_ely_share','resid_ely_share_prev']], how='inner', on='REG_imp')
+        is_e = df['TRAD_COMM'] == ely
+        E = df['pool'].where(is_e, 0.0).groupby(df['REG_imp']).transform('sum')
+        F = df['pool'].where(~is_e, 0.0).groupby(df['REG_imp']).transform('sum')
+        t = df['resid_ely_share'].clip(0.0, 1.0)
+        if not resid_level:
+            cur = np.where(E + F > 0, E / (E + F).replace(0, np.nan), 0.0)
+            t = 1.0 - (1.0 - cur) * (1.0 - t) / (1.0 - df['resid_ely_share_prev'].clip(0.0, 1.0)).clip(lower=0.05)
+            t = t.clip(0.0, 1.0)
+        x = (t * (E + F) - E) / (1.0 / heat_efficiency + t * (1.0 - 1.0 / heat_efficiency))
+        x = np.minimum(np.maximum(x, -E * heat_efficiency), F)
+        fuel_part = np.where(F > 0, df['pool'] / F.replace(0, np.nan), 0.0)
+        x = np.where(F > 0, x, 0.0)
+        df['d_res'] = np.where(is_e, x / heat_efficiency, -x * fuel_part)
+        df['d_res'] = df['d_res'].fillna(0.0)
+        return df[['REG_imp','TRAD_COMM','d_res']]
+
+    def hh_fuel_substitution(self, energy_flows, hh_cons, hh_price, delta_inc_rel, road_share=0.9, ev_efficiency=1.5, heat_efficiency=3.0, resid_level=False):
         # ? hh substitution across energy carriers
         # ! NOTE: we only do substitution here, because own price elasticity
         # ! is in the HH module, so overall value of energy (constant price)
@@ -500,6 +542,17 @@ class ener_balance:
             hh = hh.drop(columns=['d_ev']).merge(d_ev, how='left', on=['REG_imp','TRAD_COMM'])
             hh['d_ev'] = hh['d_ev'].fillna(0.0)
             hh['physical_value'] = hh['physical_value'] + hh['d_ev']
+        # ? residential channel: heating fuels <-> electricity (see resid_heat_shift)
+        resid_share = self.common.get('resid_ely_share')
+        if resid_share is not None and len(resid_share) > 0:
+            petrol = self.PRODUCTS[self.PRODUCTS['Sector_names'].str.contains('Refined petroleum')]['Lfd_Nr'].to_list()
+            ely = self.PRODUCTS[self.PRODUCTS['Sector_names'].str.contains('Electric power')]['Lfd_Nr'].to_list()
+            assert len(petrol) == 1 and len(ely) == 1, f"Residential channel needs exactly one petrol and one electricity sector, found {petrol}, {ely}"
+            d_res = self.resid_heat_shift(hh[['REG_imp','TRAD_COMM','physical_value']], resid_share, ev_share, price_index,
+                                          petrol[0], ely[0], road_share, ev_efficiency, heat_efficiency, resid_level)
+            hh = hh.merge(d_res, how='left', on=['REG_imp','TRAD_COMM'])
+            hh['physical_value'] = hh['physical_value'] + hh['d_res'].fillna(0.0)
+            hh = hh.drop(columns=['d_res'])
         hh['share'] = hh['physical_value'] / hh.groupby(['REG_imp'])['physical_value'].transform('sum')
         # ? is share is small exclude (to avoid pushing the price)
         sel_ = hh['share'] < 0.01

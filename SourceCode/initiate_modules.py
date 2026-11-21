@@ -451,7 +451,8 @@ def initiate_modules(self, DYNAMIC, EXOG_VARS, MRIO_df_to_vec_DEF, MRIO_vec_to_d
         'carbon_content_process': DYNAMIC['carbon_content_process'],
         'fuel_price': DYNAMIC['fuel_price'],
         'ctax_price_impact': ctax_price_impact,
-        'ev_share': Scenario.ev_share # REG_imp | ev_share | ev_share_prev (household EV channel)
+        'ev_share': Scenario.ev_share, # household EV channel
+        'resid_ely_share': Scenario.resid_ely_share # household residential channel
     })
 
     # calculate energy_flows based on the IO table and implicit prices stored from the first year

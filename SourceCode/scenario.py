@@ -92,6 +92,7 @@ class scenario:
         self.set_fd_exog()
         self.set_hh_permanent()
         self.set_ev_share()
+        self.set_resid_ely_share()
 
     def set_carbon_tax(self):
         # first we read in the scenario file, the columns are set in the template
@@ -469,17 +470,18 @@ class scenario:
         # ! category, and the sector column is always electricity; both are ignored - the
         # ! channel always moves household demand from refined petroleum to electricity
         year_prev = max(self.YEAR - 1, self.YEARS[0]) if len(self.YEARS) > 0 else self.YEAR
-        columns_ = ['REG_imp','ev_share_prev','ev_share']
+        year_base = self.YEARS[0] if len(self.YEARS) > 0 else self.YEAR
+        columns_ = ['REG_imp','ev_share_prev','ev_share','ev_share_base']
 
         try:
             ev = pd.read_excel(self.scenario_file, sheet_name='EV stock shares', skiprows=13)
-            ev = ev[['Country ISO*', year_prev, self.YEAR]]
+            ev = pd.concat([ev['Country ISO*'], ev[year_prev], ev[self.YEAR], ev[year_base]], axis=1)
             ev.columns = columns_
         except (ValueError, KeyError):
             ev = pd.DataFrame(columns=columns_)
 
         ev = ev.dropna(subset=['REG_imp']).copy()
-        ev[['ev_share_prev','ev_share']] = ev[['ev_share_prev','ev_share']].fillna(0.0).clip(0.0, 1.0)
+        ev[['ev_share_prev','ev_share','ev_share_base']] = ev[['ev_share_prev','ev_share','ev_share_base']].fillna(0.0).clip(0.0, 1.0)
 
         # add index before resolving
         ev['Line'] = np.arange(len(ev)).tolist()
@@ -488,9 +490,43 @@ class scenario:
         ev = resolve_all(ev, "REG_imp", self.REGIONS['Region_acronyms'].to_list())
 
         # ? REG_imp | ev_share | ev_share_prev; regions absent from the sheet get no shift
-        ev = ev.drop(columns=['Line']).groupby(['REG_imp']).agg({'ev_share':'max','ev_share_prev':'max'}).reset_index()
+        ev = ev.drop(columns=['Line']).groupby(['REG_imp']).agg({'ev_share':'max','ev_share_prev':'max','ev_share_base':'max'}).reset_index()
 
         self.ev_share = ev
+
+        return True
+
+    # ^ //////////////////////////////////////
+
+    # ^ ------------------------------------
+    # ^   Sheet: Buildings electricity shares
+    # ^ ------------------------------------
+
+    def set_resid_ely_share(self):
+        # ? electricity share of household non-road energy, current and previous year
+        year_prev = max(self.YEAR - 1, self.YEARS[0]) if len(self.YEARS) > 0 else self.YEAR
+        columns_ = ['REG_imp','resid_ely_share','resid_ely_share_prev']
+
+        try:
+            raw = pd.read_excel(self.scenario_file, sheet_name='Buildings electricity shares', header=None)
+            # header row = last 'Country ISO*' row
+            head = raw.index[raw.apply(lambda r: (r == 'Country ISO*').any(), axis=1)][-1]
+            res = raw.iloc[head+1:].copy()
+            res.columns = [int(c) if isinstance(c, (int, float)) and not pd.isna(c) else c for c in raw.iloc[head].to_list()]
+            res = pd.concat([res['Country ISO*'], res[self.YEAR], res[year_prev]], axis=1)
+            res.columns = columns_
+        except (ValueError, KeyError, IndexError):
+            res = pd.DataFrame(columns=columns_)
+
+        res = res.dropna(subset=['REG_imp','resid_ely_share']).copy()
+        res['resid_ely_share'] = res['resid_ely_share'].astype(float).clip(0.0, 1.0)
+        res['resid_ely_share_prev'] = res['resid_ely_share_prev'].astype(float).fillna(res['resid_ely_share']).clip(0.0, 1.0)
+
+        res['Line'] = np.arange(len(res)).tolist()
+        res = resolve_comma(res, "REG_imp")
+        res = resolve_all(res, "REG_imp", self.REGIONS['Region_acronyms'].to_list())
+
+        self.resid_ely_share = res.drop(columns=['Line']).groupby(['REG_imp']).agg({'resid_ely_share':'last','resid_ely_share_prev':'last'}).reset_index()
 
         return True
 
