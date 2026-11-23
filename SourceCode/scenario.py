@@ -70,6 +70,9 @@ class scenario:
         self.PRODUCTS = EXOG_VARS.P
         self.P_IDS = [int(x) for x in EXOG_VARS.P_list]
         self.IND_BASE = EXOG_VARS.IND_BASE.reset_index()
+        # fuel inputs of the power sector (extraction + refining roles): scaled by ratio, not additive
+        self.power_ratio_sectors = sorted({int(x) for role in ('cost_curve', 'refining')
+                                           for x in EXOG_VARS.SECTOR_ROLES[role]})
 
         self.HH_BASE = EXOG_VARS.HH_BASE # type: ignore
         self.GOV_BASE = EXOG_VARS.GOV_BASE # type: ignore
@@ -1013,98 +1016,203 @@ class scenario:
             io_changes = pd.DataFrame(columns=['REG_imp','PROD_COMM','REG_exp','TRAD_COMM','Type','Value'])
             
         # Bring in power sector IO changes
+        self._io_changes_nonpower = io_changes
         io_changes =  pd.concat([io_changes, self.set_power_io_changes()], axis=0)
         
         self.io_changes = io_changes
 
         return io_changes
+
+    def rebuild_io_changes(self):
+        # re-assemble io_changes after the power residual has been set (first model year)
+        io_changes = pd.concat([self._io_changes_nonpower, self.set_power_io_changes()], axis=0)
+        self.io_changes = io_changes
+        return io_changes
     
     #%%
     # ^ //////////////////////////////////////
     
-    def set_power_io_changes(self):
+    def _power_totals(self):
+        """
+        Theoretical input structure of the power sector implied by the 'Power generation shares'
+        sheet (shares x global technology recipe), summed over exporters:
+        REG_imp, PROD_COMM, TRAD_COMM, Value.  Returns None if the scenario has no such sheet.
+        Cached per Scenario instance (one instance per year).
+        """
+        if hasattr(self, '_power_totals_cache'):
+            return self._power_totals_cache
 
         columns_ = ['REG_imp', 'PROD_COMM', 'Technology', 'Value']
-        columns_empty =  ['REG_imp', 'REG_exp','PROD_COMM','TRAD_COMM', 'Value', 'Type']
-        
         try:
             power_generation = pd.read_excel(self.scenario_file, sheet_name="Power generation shares", skiprows=13)
             power_generation = power_generation[['Country ISO*','Sector code*','Technology name*',self.YEAR]]
             power_generation.columns = columns_
-        except ValueError:
-            power_generation = pd.DataFrame(columns=columns_empty)
+        except (ValueError, KeyError):
+            self._power_totals_cache = None
+            return None
 
-            
-        if(len(power_generation)>0):
-            # ! blank year-cells are explicit zeros (technology absent from the
-            # ! mix that year); left as NaN the instruction silently vanishes
-            # ! downstream instead of zeroing the coefficient
-            power_generation['Value'] = power_generation['Value'].fillna(0)
+        if len(power_generation) == 0:
+            self._power_totals_cache = None
+            return None
 
-            # io_power's column names are the canonical technology names
-            power_generation['Technology'] = power_generation['Technology'].replace(
-                {'Wind onshore': 'Wind', 'Wind offshore': 'Wind'})
+        # ! blank year-cells are explicit zeros (technology absent from the
+        # ! mix that year); left as NaN the instruction silently vanishes
+        # ! downstream instead of zeroing the coefficient
+        power_generation['Value'] = power_generation['Value'].fillna(0)
 
-            # sum across renewables and calculate shares
-            # power_share = pd.read_excel(self.scenario_file, sheet_name='Power_investment', skiprows=14)
-            shares = power_generation.groupby(['REG_imp', 'PROD_COMM','Technology'], as_index=False).sum()
-            shares['share'] = shares['Value']/(shares.groupby(['REG_imp','PROD_COMM'])['Value'].transform('sum'))
-            # ! zero shares are KEPT: they must produce zero-replacements for
-            # ! the technology's input coefficients (e.g. coal exiting the mix);
-            # ! filtering them out froze the coefficient at its last nonzero
-            # ! value and let fuel use regrow with output
-            
-            # Read in renewable investment converters
-            io_power = pd.read_csv(os.path.join(os.getcwd(), 'Data', 'MSET_data', 'Energy_emissions', 'power_generation_IO.csv'), index_col = 0)
-            io_power.index.name = 'TRAD_COMM'
-            # inv_renew = inv_renew.iloc[:,1:]
-            io_power_long = pd.melt(io_power.reset_index(), id_vars=['TRAD_COMM'], 
-                                          var_name='Technology', 
-                                          value_name='value')
-            
-            unmatched_tech = set(shares['Technology'].dropna()) - set(io_power.columns)
-            if unmatched_tech:
-                print(f"WARNING set_power_io_changes: technologies {sorted(unmatched_tech)} "
-                      f"not found in power_generation_IO.csv - their shares carry no input structure")
+        # io_power's column names are the canonical technology names
+        power_generation['Technology'] = power_generation['Technology'].replace(
+            {'Wind onshore': 'Wind', 'Wind offshore': 'Wind'})
 
-            # Merge shares and investment converter
-            merge_df = io_power_long.merge(shares,on=['Technology']).fillna(0)
-            merge_df['new_share'] = merge_df['value'] * merge_df['share']
-            io_changes = merge_df.groupby(['TRAD_COMM','REG_imp','PROD_COMM'], as_index=False).agg({'new_share':'sum'})
-            # ! zero-valued replacements are kept, but only for commodities that
-            # ! are actual inputs to at least one generation technology - there a
-            # ! zero IS the instruction (replace the coefficient with 0);
-            # ! commodities outside the power recipe get no row at all
-            power_input_comms = io_power.index[io_power.abs().sum(axis=1) > 0]
-            io_changes = io_changes[io_changes['TRAD_COMM'].isin(power_input_comms)]
-            io_changes = io_changes[['REG_imp', 'PROD_COMM', 'TRAD_COMM', 'new_share']]
-            io_changes.rename(columns={"new_share":"Value"}, inplace=True)
+        shares = power_generation.groupby(['REG_imp', 'PROD_COMM','Technology'], as_index=False).sum()
+        shares['share'] = shares['Value']/(shares.groupby(['REG_imp','PROD_COMM'])['Value'].transform('sum'))
+        # ! zero shares are KEPT: they must produce zero-replacements for
+        # ! the technology's input coefficients (e.g. coal exiting the mix);
+        # ! filtering them out froze the coefficient at its last nonzero
+        # ! value and let fuel use regrow with output
 
-            # ! spread each replacement across exporters by base trade shares
-            # ! (same logic as complement_ALL in set_io_changes): pinning it to
-            # ! REG_exp == REG_imp leaves imported fuel flows (e.g. UZB gas into
-            # ! TJK power) untouched by the generation pathway, and double-counts
-            # ! by assigning the full recipe to the domestic flow on top of them
-            base_flows = self.IND_BASE[['REG_imp','REG_exp','PROD_COMM','TRAD_COMM','z_bp']]\
-                .astype({'PROD_COMM': 'int16', 'TRAD_COMM': 'int16'})
-            io_changes = io_changes.astype({'PROD_COMM': 'int16', 'TRAD_COMM': 'int16'})\
-                .merge(base_flows, how='left', on=['REG_imp','PROD_COMM','TRAD_COMM'])
-            io_changes['REG_exp_share'] = \
-                io_changes['z_bp'] / io_changes.groupby(['REG_imp','PROD_COMM','TRAD_COMM'])['z_bp'].transform('sum')
-            io_changes['Value'] = io_changes['Value'] * io_changes['REG_exp_share']
-            io_changes = io_changes[~io_changes['Value'].isna()]
-            io_changes = io_changes[['REG_imp', 'REG_exp', 'PROD_COMM', 'TRAD_COMM', 'Value']]
-            # # ! ALWAYS rebalancing to 1 [column-wise | PROD_COMM]
-            # io_changes['new_Value'] = io_changes['Value'] * (1 / io_changes.groupby(['REG_imp','PROD_COMM'])['Value'].transform('sum'))
-            # io_changes = io_changes.fillna(0)
-            # io_changes['Value'] = io_changes['new_Value']
-            # io_changes = io_changes.drop(columns=['new_Value'])
+        io_power = pd.read_csv(os.path.join(os.getcwd(), 'Data', 'MSET_data', 'Energy_emissions', 'power_generation_IO.csv'), index_col = 0)
+        io_power.index.name = 'TRAD_COMM'
+        io_power_long = pd.melt(io_power.reset_index(), id_vars=['TRAD_COMM'],
+                                var_name='Technology', value_name='value')
 
-            
-            # set type to replace
-            io_changes['Type'] = 'replace'
+        unmatched_tech = set(shares['Technology'].dropna()) - set(io_power.columns)
+        if unmatched_tech:
+            print(f"WARNING set_power_io_changes: technologies {sorted(unmatched_tech)} "
+                  f"not found in power_generation_IO.csv - their shares carry no input structure")
+
+        merge_df = io_power_long.merge(shares, on=['Technology']).fillna(0)
+        merge_df['new_share'] = merge_df['value'] * merge_df['share']
+        totals = merge_df.groupby(['REG_imp','PROD_COMM','TRAD_COMM'], as_index=False).agg({'new_share':'sum'})
+
+        # ! zero-valued replacements are kept, but only for commodities that
+        # ! are actual inputs to at least one generation technology - there a
+        # ! zero IS the instruction (replace the coefficient with 0);
+        # ! commodities outside the power recipe get no row at all
+        power_input_comms = io_power.index[io_power.abs().sum(axis=1) > 0]
+        totals = totals[totals['TRAD_COMM'].isin(power_input_comms)]
+        totals = totals.rename(columns={'new_share':'Value'})
+        totals = totals.astype({'REG_imp': str, 'PROD_COMM': 'int16', 'TRAD_COMM': 'int16'})
+
+        self._power_totals_cache = totals
+        return totals
+
+    @staticmethod
+    def _power_obs_totals(ind_trade):
+        """Sum of IO_coef_trade over exporters: REG_imp, PROD_COMM, TRAD_COMM, obs."""
+        obs = ind_trade.reset_index()[['REG_imp','PROD_COMM','TRAD_COMM','IO_coef_trade']]
+        obs = obs.astype({'REG_imp': str, 'PROD_COMM': 'int16', 'TRAD_COMM': 'int16'})
+        obs = obs.groupby(['REG_imp','PROD_COMM','TRAD_COMM'], as_index=False)['IO_coef_trade'].sum()
+        return obs.rename(columns={'IO_coef_trade':'obs'})
+
+    def compute_power_residual(self, ind_trade):
+        """
+        Coefficient residual = observed (ind_trade, first model year) - theoretical (power shares).
+        Both are totals over exporters (the shares only describe TRAD_COMM -> PROD_COMM, not
+        where the inputs come from). Returns REG_imp, PROD_COMM, TRAD_COMM, power_io_resid,
+        or None if the scenario has no power shares.
+        """
+        totals = self._power_totals()
+        if totals is None:
+            return None
+        obs = self._power_obs_totals(ind_trade)
+        resid = totals.merge(obs, how='left', on=['REG_imp','PROD_COMM','TRAD_COMM'])
+        resid['obs'] = resid['obs'].fillna(0)
+        resid['power_io_resid'] = resid['obs'] - resid['Value']
+        # observed / theoretical kept alongside for diagnostics
+        resid = resid.rename(columns={'obs':'observed','Value':'theoretical'})
+        return resid[['REG_imp','PROD_COMM','TRAD_COMM','power_io_resid','observed','theoretical']]
+
+    # fuel rows: cap on the share-implied change relative to the first year (T(t) / T(first year))
+    POWER_RATIO_CAP = 10.0
+    POWER_RATIO_EPS = 1e-6
+
+    def _apply_power_resid(self, totals, resid):
+        """
+        Turn the share-implied totals T(t) into the actual power-sector input coefficients.
+
+        - fuel rows (TRAD_COMM in self.power_ratio_sectors = cost_curve + refining roles):
+          observed * T(t) / T(first year). The recipe cancels for fuels one technology supplies,
+          so the fuel's efficiency and the country's price level stay in the observed coefficient
+          and only the generation mix moves it. Equal to the observed value in the first year.
+        - all other rows (and fuel rows without a usable first-year ratio: observed or
+          theoretical ~0): additive, T(t) + residual, floored at 0.
+        The 0.03-0.97 column-sum guard in InputOutput.io_change still applies afterwards.
+        """
+        key3 = ['REG_imp','PROD_COMM','TRAD_COMM']
+        cols = key3 + ['power_io_resid'] + [c for c in ('observed','theoretical') if c in resid.columns]
+        out = totals.merge(resid[cols], how='left', on=key3)
+        out['power_io_resid'] = out['power_io_resid'].fillna(0)
+        additive = (out['Value'] + out['power_io_resid']).clip(lower=0)
+
+        if not {'observed','theoretical'}.issubset(out.columns):
+            out['Value'] = additive
+            return out.drop(columns=['power_io_resid'])
+
+        is_fuel = out['TRAD_COMM'].isin(self.power_ratio_sectors)
+        usable = is_fuel & (out['theoretical'] > self.POWER_RATIO_EPS) & (out['observed'] > 0)
+        scale = (out['Value'] / out['theoretical']).where(usable)
+        capped = usable & (scale > self.POWER_RATIO_CAP)
+        scale = scale.clip(upper=self.POWER_RATIO_CAP)
+        out['Value'] = np.where(usable, out['observed'] * scale, additive)
+
+        fallback = is_fuel & ~usable & ((out['Value'] > 0) | (out['theoretical'] > 0))
+        if capped.any():
+            items = ', '.join(f"{r.REG_imp}: input {r.TRAD_COMM}" for r in out[capped].itertuples())
+            print(f"WARNING power fuel ratio capped at {self.POWER_RATIO_CAP:g}x first-year value ({items})")
+        if fallback.any() and self.YEAR == min(self.YEARS):  # once per run, not every year
+            items = ', '.join(f"{r.REG_imp}: input {r.TRAD_COMM}" for r in out[fallback].itertuples())
+            print(f"WARNING power fuel rows without a first-year ratio use the additive residual ({items})")
+        return out.drop(columns=[c for c in ('power_io_resid','observed','theoretical') if c in out.columns])
+
+    def set_power_io_changes(self):
+
+        columns_empty=  ['REG_imp', 'REG_exp','PROD_COMM','TRAD_COMM', 'Value', 'Type']
+
+        totals = self._power_totals()
+
+        if totals is None or len(totals) == 0:
+            io_changes = pd.DataFrame(columns=columns_empty)
         else:
-            io_changes = power_generation
+            totals = totals.copy()
+
+            # actual coefficient totals: fuel rows scaled by ratio, all other rows additive residual
+            resid = getattr(self, 'power_resid', None)
+            if resid is not None:
+                totals = self._apply_power_resid(totals, resid)
+
+            # ! spread each total across exporters by the existing supply structure (z_bp), so the
+            # ! import structure stays intact; the shares only change the TRAD_COMM -> PROD_COMM level
+            key3 = ['REG_imp','PROD_COMM','TRAD_COMM']
+            base_flows = self.IND_BASE[['REG_imp','REG_exp','PROD_COMM','TRAD_COMM','z_bp']]\
+                .astype({'REG_imp': str, 'REG_exp': str, 'PROD_COMM': 'int16', 'TRAD_COMM': 'int16'})
+            spread = totals.merge(base_flows, how='left', on=key3)
+            spread['z_sum'] = spread.groupby(key3)['z_bp'].transform('sum')
+
+            # existing supply structure
+            has_supply = spread['z_sum'] > 0
+            existing = spread[has_supply].copy()
+            existing['Value'] = existing['Value'] * existing['z_bp'] / existing['z_sum']
+            existing['Type'] = 'replace'
+
+            # ! no supply structure at all (new input for this country's power sector, or all
+            # ! flows already dead): we do not know where it comes from -> allocate to the
+            # ! domestic exporter REG_exp = REG_imp. 'replace_new' tells io_change() to create
+            # ! the flow if it is not in the sparse matrix.
+            new = spread[~has_supply].drop_duplicates(subset=key3)[key3 + ['Value']].copy()
+            new['REG_exp'] = new['REG_imp']
+            new['Type'] = 'replace_new'
+            new_pos = new[new['Value'] > 0]
+            if len(new_pos) > 0:
+                items = ', '.join(f"{r.REG_imp}: input {r.TRAD_COMM} -> sector {r.PROD_COMM}" for r in new_pos.itertuples())
+                print(f"WARNING set_power_io_changes: no existing supply structure for {len(new_pos)} "
+                      f"power-sector input(s) ({items}); allocated to REG_exp = REG_imp (domestic)")
+            new = new[new['Value'] > 0]  # a zero 'replace' of a non-existing flow is a no-op
+
+            io_changes = pd.concat([existing[['REG_imp','REG_exp','PROD_COMM','TRAD_COMM','Value','Type']],
+                                    new[['REG_imp','REG_exp','PROD_COMM','TRAD_COMM','Value','Type']]],
+                                   ignore_index=True)
+            io_changes = io_changes[~io_changes['Value'].isna()]
         
         if len(io_changes) > 0:
 

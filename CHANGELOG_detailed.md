@@ -4,6 +4,26 @@ This file records detailed technical notes on significant refactors and migratio
 
 ---
 
+## 2026-11-19 — Power-sector coefficient residuals
+
+### Summary
+
+Power-share-driven IO replacements used global recipe values, discarding country-specific input structure. A residual fixed in the first model year now keeps it.
+
+### Details
+
+- `scenario.py`: `set_power_io_changes` split into `_power_totals` (sheet x recipe, summed over exporters, cached per instance), `compute_power_residual(ind_trade)`, and the spread step. `set_io_changes` keeps the non-power rows in `_io_changes_nonpower`; `rebuild_io_changes()` re-assembles `io_changes` once the residual exists (first year).
+- `initiate_modules.py`: first year, right after `Trade_model.calc_IO_coef`, computes and writes `power_io_resid` and rebuilds `io_changes`; later years read it from `model_start` and set `Scenario.power_resid` before `set_io_changes()`.
+- `InputOutput.io_change`: `replace_new` rows are appended to the sparse matrix when the cell does not exist, then treated as `replace`.
+- `variables.xlsx`: `power_io_resid` (REG_imp, PROD_COMM, TRAD_COMM), MIN/MAX +-Inf.
+- Non-fuel rows: residual is additive with a floor of 0 on the sum; the existing 0.03-0.97 column-sum guard in `io_change` still applies.
+- Fuel rows (`TRAD_COMM` in `Scenario.power_ratio_sectors` = `SECTOR_ROLES['cost_curve']` + `['refining']`): `_apply_power_resid` sets the coefficient to `observed * T(t) / T(first year)` (`observed`/`theoretical` come from the stored `power_io_resid` frame), with the ratio capped at `POWER_RATIO_CAP` = 10 and `observed > 0`, `theoretical > POWER_RATIO_EPS` required; otherwise the additive residual is used. The recipe cancels for fuels one technology supplies, so efficiency and country price level stay in the observed coefficient.
+- Why: the global recipe level is about 2x the observed coefficient for coal and gas (AJN coal 0.159 vs 0.075), so adding the recipe's full change drove the coefficient to 0 well before the technology left the mix.
+- Test: `_apply_power_resid` unit-checked on synthetic frames (first year reproduces observed; ratio scaling, cap, fallback). Not yet re-run end-to-end.
+- Test: IEA_CP 2019-2021 ran cleanly; max change of any power-sector input coefficient 2019->2020 was about 0.011.
+
+---
+
 ## 2026-03-31 — Type 1 DYNAMIC variable migration to `self.V`
 
 ### Summary

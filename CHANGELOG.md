@@ -29,6 +29,19 @@ Scenario-driven shift of household energy use between heating fuels and electric
 * `heat_efficiency` and `resid_level` are code defaults, not settings.
 * Recalibrate before use.
 
+### 2026-11-19 — Power-sector coefficient residuals _[Prepared by Claude]_
+
+#### Added
+
+* The electricity sector's input structure is driven by the exogenous `Power generation shares` sheet and the global recipe in `power_generation_IO.csv`. Local structure differs from the global recipe, so the first model year now stores a **coefficient residual** = observed (`ind_trade`) − share-implied, both summed over exporters, per `REG_imp` × `PROD_COMM` × `TRAD_COMM`. New variable `power_io_resid` (registered in `variables.xlsx`, written to `Results/` as parquet).
+* In every later year the coefficient total for non-fuel rows is `max(share-implied + residual, 0)`; in the first year this equals the observed structure, so there is no jump.
+* Fuel rows (inputs in the `cost_curve` and `refining` sector roles) are scaled by ratio instead: `observed × share-implied(t) / share-implied(first year)`, capped at 10×. The additive residual drove fuel coefficients to zero while the technology still had a sizeable share (the recipe level is about twice the observed one for coal and gas, e.g. AJN coal row hit 0 by ~2032, NAM by 2025). Rows with no usable first-year ratio (observed or share-implied ~0) fall back to the additive residual, with a warning.
+
+#### Changed
+
+* The total is spread across exporters by the existing `z_bp` shares, so the import structure is preserved.
+* Inputs with no existing supply structure (new technology input, or all flows dead) are allocated to `REG_exp = REG_imp` and a warning is printed. New row type `replace_new` makes `InputOutput.io_change` create the flow if it is missing from the sparse matrix (before, such replacements were silently dropped).
+
 ### 2026-11-19 — Energy products removed from calibration _[Prepared by Claude]_
 
 #### Changed
