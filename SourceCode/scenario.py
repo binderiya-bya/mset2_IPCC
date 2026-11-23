@@ -70,6 +70,9 @@ class scenario:
         self.PRODUCTS = EXOG_VARS.P
         self.P_IDS = [int(x) for x in EXOG_VARS.P_list]
         self.IND_BASE = EXOG_VARS.IND_BASE.reset_index()
+        # fuel inputs of the power sector (extraction + refining roles): scaled by ratio, not additive
+        self.power_ratio_sectors = sorted({int(x) for role in ('cost_curve', 'refining')
+                                           for x in EXOG_VARS.SECTOR_ROLES[role]})
 
         self.HH_BASE = EXOG_VARS.HH_BASE # type: ignore
         self.GOV_BASE = EXOG_VARS.GOV_BASE # type: ignore
@@ -1084,9 +1087,51 @@ class scenario:
         resid = resid.rename(columns={'obs':'observed','Value':'theoretical'})
         return resid[['REG_imp','PROD_COMM','TRAD_COMM','power_io_resid','observed','theoretical']]
 
+    # fuel rows: cap on the share-implied change relative to the first year (T(t) / T(first year))
+    POWER_RATIO_CAP = 10.0
+    POWER_RATIO_EPS = 1e-6
+
+    def _apply_power_resid(self, totals, resid):
+        """
+        Turn the share-implied totals T(t) into the actual power-sector input coefficients.
+
+        - fuel rows (TRAD_COMM in self.power_ratio_sectors = cost_curve + refining roles):
+          observed * T(t) / T(first year). The recipe cancels for fuels one technology supplies,
+          so the fuel's efficiency and the country's price level stay in the observed coefficient
+          and only the generation mix moves it. Equal to the observed value in the first year.
+        - all other rows (and fuel rows without a usable first-year ratio: observed or
+          theoretical ~0): additive, T(t) + residual, floored at 0.
+        The 0.03-0.97 column-sum guard in InputOutput.io_change still applies afterwards.
+        """
+        key3 = ['REG_imp','PROD_COMM','TRAD_COMM']
+        cols = key3 + ['power_io_resid'] + [c for c in ('observed','theoretical') if c in resid.columns]
+        out = totals.merge(resid[cols], how='left', on=key3)
+        out['power_io_resid'] = out['power_io_resid'].fillna(0)
+        additive = (out['Value'] + out['power_io_resid']).clip(lower=0)
+
+        if not {'observed','theoretical'}.issubset(out.columns):
+            out['Value'] = additive
+            return out.drop(columns=['power_io_resid'])
+
+        is_fuel = out['TRAD_COMM'].isin(self.power_ratio_sectors)
+        usable = is_fuel & (out['theoretical'] > self.POWER_RATIO_EPS) & (out['observed'] > 0)
+        scale = (out['Value'] / out['theoretical']).where(usable)
+        capped = usable & (scale > self.POWER_RATIO_CAP)
+        scale = scale.clip(upper=self.POWER_RATIO_CAP)
+        out['Value'] = np.where(usable, out['observed'] * scale, additive)
+
+        fallback = is_fuel & ~usable & ((out['Value'] > 0) | (out['theoretical'] > 0))
+        if capped.any():
+            items = ', '.join(f"{r.REG_imp}: input {r.TRAD_COMM}" for r in out[capped].itertuples())
+            print(f"WARNING power fuel ratio capped at {self.POWER_RATIO_CAP:g}x first-year value ({items})")
+        if fallback.any() and self.YEAR == min(self.YEARS):  # once per run, not every year
+            items = ', '.join(f"{r.REG_imp}: input {r.TRAD_COMM}" for r in out[fallback].itertuples())
+            print(f"WARNING power fuel rows without a first-year ratio use the additive residual ({items})")
+        return out.drop(columns=[c for c in ('power_io_resid','observed','theoretical') if c in out.columns])
+
     def set_power_io_changes(self):
 
-        columns_empty =  ['REG_imp', 'REG_exp','PROD_COMM','TRAD_COMM', 'Value', 'Type']
+        columns_empty=  ['REG_imp', 'REG_exp','PROD_COMM','TRAD_COMM', 'Value', 'Type']
 
         totals = self._power_totals()
 
@@ -1095,13 +1140,10 @@ class scenario:
         else:
             totals = totals.copy()
 
-            # actual coefficient totals = theoretical + residual (floored at 0)
+            # actual coefficient totals: fuel rows scaled by ratio, all other rows additive residual
             resid = getattr(self, 'power_resid', None)
             if resid is not None:
-                totals = totals.merge(resid[['REG_imp','PROD_COMM','TRAD_COMM','power_io_resid']], how='left', on=['REG_imp','PROD_COMM','TRAD_COMM'])
-                totals['power_io_resid'] = totals['power_io_resid'].fillna(0)
-                totals['Value'] = (totals['Value'] + totals['power_io_resid']).clip(lower=0)
-                totals = totals.drop(columns=['power_io_resid'])
+                totals = self._apply_power_resid(totals, resid)
 
             # ! spread each total across exporters by the existing supply structure (z_bp), so the
             # ! import structure stays intact; the shares only change the TRAD_COMM -> PROD_COMM level
