@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-11-24 — Fuel substitution: full change now reaches the IO coefficients _[Prepared by Claude]_
+
+#### Fixed
+
+* `calc_fuel_substitution`: each supplier's share of a fuel change was divided by the whole fuel's use, so a fuel received only the sum of its squared supplier/product shares of the intended change. Every supplier and product within a fuel now moves by the fuel's own percentage change, and a sector's fuel total is conserved. Results change for all fuels in industry; recalibrate, and review energy elasticities tuned before this fix. Model not re-run.
+
 ### 2026-11-20 — Household residential channel: heating fuels ↔ electricity _[Prepared by Claude]_
 
 Scenario-driven shift of household energy use between heating fuels and electricity. Households only (no services). **Draft: compiles, reader and shift tested on `IEA_CP.xlsx` and the 20 Nov results; model not run.**

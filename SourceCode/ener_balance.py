@@ -442,7 +442,10 @@ class ener_balance:
                                                                     # , how='left', on=['REG_imp','REG_exp','PROD_COMM','TRAD_COMM'])
         # kUSD / TJ -> implicit_price
         # fueluse -> TJ
-        energy_flows_substitution['fuel_use_change_relative'] =  np.nan_to_num(energy_flows_substitution['fuel_use_change'] / energy_flows_substitution['fuel_use'],nan=0,posinf=0,neginf=0) # TJ * kUSD/TJ
+        # fuel_use is the whole fuel's use, fuel_use_change is already this flow's share of the change:
+        # divide by this flow's own use, so every supplier/product moves by the same % as the fuel
+        flow_use = energy_flows_substitution['fuel_use'] * energy_flows_substitution['share_in_fuel'] * energy_flows_substitution['component_share']
+        energy_flows_substitution['fuel_use_change_relative'] =  np.nan_to_num(energy_flows_substitution['fuel_use_change'] / flow_use,nan=0,posinf=0,neginf=0) # TJ * kUSD/TJ
 
         return {
             'energy_flows': energy_flows_substitution[['REG_imp','REG_exp','PROD_COMM','TRAD_COMM','fuel_use_new_adj']].copy(),

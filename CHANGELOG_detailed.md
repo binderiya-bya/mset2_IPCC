@@ -4,6 +4,13 @@ This file records detailed technical notes on significant refactors and migratio
 
 ---
 
+## 2026-11-24 — Fuel-substitution relative change
+
+- `ener_balance.py::calc_fuel_substitution`: `fuel_use_change` is split to flow level (`share_in_fuel * component_share`), but `fuel_use_change_relative` divided it by the fuel-level `fuel_use`. The applied fuel change was `intended * sum(s_c^2)` (`s_c` = flow share within the fuel group, which pools suppliers and products, e.g. hard coal and coke). The denominator is now `fuel_use * share_in_fuel * component_share`.
+- Effect of the old code: concentrated fuels (domestic electricity) received nearly the full change and diversified ones a small part, so sector fuel totals drifted from the post-efficiency total (SAS sector 12 energy per output +12% by 2050 in the IEA_CP calibration). The efficiency change passes through the same step.
+- Test: function called on stored 2021 flows with price changes set to zero: sector totals conserved (max relative error 4e-16), no negative flows. Model not re-run.
+- Not changed: the returned `energy_flows` (`fuel_use_new_adj`) also applies shares twice to the change; the caller does not use it.
+
 ## 2026-11-19 — Power-sector coefficient residuals
 
 ### Summary
