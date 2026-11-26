@@ -682,6 +682,8 @@ class scenario:
         ee_exog = resolve_comma(ee_exog, "PROD_COMM")
         ee_exog = resolve_hyphen(ee_exog, "PROD_COMM")
         ee_exog = resolve_all(ee_exog, "PROD_COMM", list(self.P_IDS))
+        # resolve_comma / resolve_hyphen turn the sector codes into text; the energy balance merges on integer codes
+        ee_exog = ee_exog.astype({'PROD_COMM': 'int'})
 
         ee_exog = ee_exog.groupby(['REG_imp','PROD_COMM']).agg({'Value':'sum'}).reset_index()
         ee_exog = ee_exog.rename(columns={'Value':'ee_change'})

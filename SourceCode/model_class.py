@@ -239,6 +239,12 @@ class ModelRun:
         # into the energy IO coefficients. Defaults to model_start+1 = original behavior.
         self.fuel_substitution_start = int(config.get('settings', 'fuel_substitution_start', fallback=self.model_start + 1))
 
+        # speed terms of the wage and employment equations: set the values here (0 = off; an .ini line overrides)
+        WAGE_SPEED = 0.15
+        EMPLOYMENT_ADJUST = 0.5
+        self.wage_speed = float(config.get('settings', 'wage_speed', fallback=WAGE_SPEED))
+        self.employment_adjust = float(config.get('settings', 'employment_adjust', fallback=EMPLOYMENT_ADJUST))
+
         self.COND_LABOR = int(config.get('settings','COND_LABOR')) / 100
         self.COND_TAX = int(config.get('settings','COND_TAX')) / 100
         self.COND_TRADE = int(config.get('settings','COND_TRADE')) / 100

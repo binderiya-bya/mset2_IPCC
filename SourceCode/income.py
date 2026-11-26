@@ -111,13 +111,15 @@ class income:
                 wage_df = wage_df.drop(columns=['annual_value_USD'])
                 return wage_df
 
-            new_wage = ((self.common['d_productivity'] * self.params['PROD_ln_L1'] + cpi_vector * self.params['CPI_ln_L1'] + unemp_vector * self.params['UNEMP_ln_L1']) + 1)
+            # ? wage speed term (see initiate_modules)
+            speed_term = self.common.get('wage_speed_term', 0.0)
+            new_wage = ((self.common['d_productivity'] * self.params['PROD_ln_L1'] + cpi_vector * self.params['CPI_ln_L1'] + unemp_vector * self.params['UNEMP_ln_L1']) + 1) + speed_term
             self.wage = _finalize_wage(new_wage)
 
             # ? counterfactual wage excluding the CPI-indexation term (wage_CPI_ln_L1); used to
             # ? isolate how much of nominal wage growth is pure inflation catch-up vs. real
             # ? (productivity/unemployment-driven) growth. See household.py calc_hh_demand_change.
-            new_wage_real = ((self.common['d_productivity'] * self.params['PROD_ln_L1'] + unemp_vector * self.params['UNEMP_ln_L1']) + 1)
+            new_wage_real = ((self.common['d_productivity'] * self.params['PROD_ln_L1'] + unemp_vector * self.params['UNEMP_ln_L1']) + 1) + speed_term
             self.wage_real = _finalize_wage(new_wage_real)
         else:
             wage = self.labor_comp.reset_index().merge(self.common['employment_base'], how='left', on=['REG_imp','PROD_COMM'])

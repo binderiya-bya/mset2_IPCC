@@ -714,7 +714,22 @@ def initiate_modules(self, DYNAMIC, EXOG_VARS, MRIO_df_to_vec_DEF, MRIO_vec_to_d
         self.V.write_var('wage', year-1, Inc_model.wage, from_df=True)
         self.V.write_var('wage', year, Inc_model.wage, from_df=True)
     else:
+        # ? wage speed term: wage_speed x gap between productivity and the real wage since the base year, max 3 points a year
+        wage_speed_term = np.zeros(len(EXOG_VARS.R_list) * len(EXOG_VARS.P_list))
+        if self.wage_speed > 0:
+            _b, _k = self.model_start - 1, ['REG_imp', 'PROD_COMM']
+            _df = lambda var, y, name: self.V.read_var(var, y, as_df=True).rename(columns={var: name})
+            _g = _df('productivity', year-1, 'p1').merge(_df('productivity', _b, 'p0'), how='left', on=_k)\
+                .merge(_df('wage', year-1, 'w1'), how='left', on=_k).merge(_df('wage', _b, 'w0'), how='left', on=_k)\
+                .merge(_df('cpi', year-1, 'c1'), how='left', on='REG_imp').merge(_df('cpi', _b, 'c0'), how='left', on='REG_imp')
+            with np.errstate(divide='ignore', invalid='ignore'):
+                _gap = np.log(_g['p1'] / _g['p0']) - np.log((_g['w1'] / _g['c1']) / (_g['w0'] / _g['c0']))
+            _g['wage_speed_term'] = (self.wage_speed * _gap.replace([np.inf, -np.inf], np.nan).fillna(0.0)).clip(-0.03, 0.03)
+            wage_speed_term = np.asarray(MRIO_df_to_vec_DEF(_g, 'wage_speed_term'), dtype=float)
+            print(f"WAGE SPEED TERM                   wage_speed {self.wage_speed}: mean {wage_speed_term.mean()*100:.2f}, "
+                  f"min {wage_speed_term.min()*100:.2f}, max {wage_speed_term.max()*100:.2f} points of wage growth")
         Inc_model.load_dynamic({
+            'wage_speed_term': wage_speed_term,
             'wage_prev': self.V.read_var('wage', year-2, as_df=True), # wage from prev year
             'wage': self.V.read_var('wage', year-1, as_df=True), # starting wage (end of last year)
             'cpi': self.V.read_var('cpi', year-1, as_df=True), # cpi this is change in consumer prices, i.e 1.2 20% from last year; it's NOT index
@@ -1277,6 +1292,18 @@ def initiate_modules(self, DYNAMIC, EXOG_VARS, MRIO_df_to_vec_DEF, MRIO_vec_to_d
     #     employment_base = Empl_model.calc_initial()
     #     self.V.write_var("employment_base", year, employment_base, from_df=True)
 
+    # ? employment adjustment term: employment_adjust x unemployment gap to the base year, max 2 points a year
+    employment_adjust_term = None
+    if year > self.model_start and self.employment_adjust > 0:
+        _b = self.model_start - 1
+        _u = self.V.read_var('shadow_unemployment_rate', year-1, as_df=True).rename(columns={'shadow_unemployment_rate': 'u1'})\
+            .merge(self.V.read_var('shadow_unemployment_rate', _b, as_df=True).rename(columns={'shadow_unemployment_rate': 'u0'}), how='left', on='REG_imp')
+        _u['employment_adjust_term'] = (self.employment_adjust * (_u['u1'] - _u['u0'])).replace([np.inf, -np.inf], np.nan).fillna(0.0).clip(-0.02, 0.02)
+        print("EMPLOYMENT ADJUSTMENT TERM        employment_adjust {}: ".format(self.employment_adjust)
+              + ", ".join(f"{r} {v*100:+.2f}" for r, v in zip(_u['REG_imp'], _u['employment_adjust_term'])) + " points of employment growth")
+        _u = self.V.read_var('wage', year, as_df=True)[['REG_imp', 'PROD_COMM']].merge(_u[['REG_imp', 'employment_adjust_term']], how='left', on='REG_imp')
+        employment_adjust_term = np.asarray(MRIO_df_to_vec_DEF(_u, 'employment_adjust_term'), dtype=float)
+
     Empl_model.load_dynamic({
         'q_base':self.V.read_var("output", year-1),
         'k':self.V.read_var('k', year),
@@ -1285,7 +1312,8 @@ def initiate_modules(self, DYNAMIC, EXOG_VARS, MRIO_df_to_vec_DEF, MRIO_vec_to_d
         'wage': self.V.read_var('wage', year, as_df=True) if year > self.model_start else None,
         'wage_prev1': self.V.read_var('wage', year-1, as_df=True) if year > self.model_start else None,
         'cpi': self.V.read_var('cpi', year-1, as_df=True) if year > self.model_start else None,
-        'cpi_prev1': self.V.read_var('cpi', year-2, as_df=True) if year > self.model_start else None
+        'cpi_prev1': self.V.read_var('cpi', year-2, as_df=True) if year > self.model_start else None,
+        'employment_adjust_term': employment_adjust_term
     })
 
     if self.cost_curve_run:

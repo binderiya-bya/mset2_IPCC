@@ -319,7 +319,12 @@ class empl:
 
         empl_t0 = self.common['empl_base'] * (dK * self.params['K_ln_L1']) + \
                 self.common['empl_base'] * (dW * self.params['W_ln_L1'])
-        
+
+        # ? employment adjustment term (see initiate_modules)
+        adjust_term = self.common.get('employment_adjust_term')
+        if adjust_term is not None:
+            empl_t0 = empl_t0 + self.common['empl_base'] * np.nan_to_num(np.asarray(adjust_term, dtype=float))
+
         return {
             'd_employment': empl_t0,
             'd_labor': empl_t0 * MRIO_df_to_vec(self.common['wage'], 'REG_imp', 'PROD_COMM', 'wage', self.R_list, self.P_list)
